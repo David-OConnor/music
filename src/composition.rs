@@ -5,36 +5,12 @@
 use std::io;
 
 use crate::{
-    ChordProgression, Key, Note, NoteDuration, NoteDurationClass, TimeSignature,
-    instrument::Instrument, player,
+    instrument::Instrument,
+    measure::{ChordProgression, Key, Measure, MicroMeasure, SharpFlat},
+    note::{Note, NoteLetter},
+    overtones::Temperament,
+    player,
 };
-
-/// A traditional music measure.
-#[derive(Clone)]
-pub struct Measure {
-    // todo: Do we want this? For assigning finer divisions to.
-    pub ident: u32,
-    pub key: Key,
-    pub time_signature: TimeSignature,
-    pub tempo: u32,
-}
-
-impl Measure {
-    pub fn to_micro_measure(&self) -> Vec<MicroMeasure> {
-        let mut res = Vec::new();
-
-        res
-    }
-}
-
-/// Describes all actions at the coarsest time granularity which can describe a given instant.
-/// It describes everything which is happening at thi state. When used to play a composition,
-/// for example, this is what is generated. We compose this from coarser constructs.
-pub struct MicroMeasure {
-    /// ms. We use the largest
-    pub duration: u32,
-}
-
 // /// Used for anchoring note durations to discrete time ticks.
 // /// If note_class = NoteDuration::Eigth, and tick_time is 200ms, and eigth note is
 // /// 200ms, and there can be no sixteenth notes.
@@ -52,6 +28,16 @@ pub struct MicroMeasure {
 //     }
 // }
 
+/// Likely tentative. Represents all notes which start in a single tick. Will have one note for single notes,
+/// multiple notes for coords. This is only the notes which *start* this tick.
+pub struct NotesStartingThisTick {
+    pub notes: Vec<Note>,
+}
+
+impl NotesStartingThisTick {
+    pub fn empty() -> Self { Self {notes: Vec::new() } }
+}
+
 /// A top level structure representing an entire work, with all its details.
 /// We are starting using the basics you would use to build a sheet music with,
 /// and are expanding it to be more general, so as not to be restricted to traditional
@@ -64,11 +50,16 @@ pub struct Composition {
     /// finer than a 16th note.
     pub ticks_per_sixteenth_note: u32,
     /// This is the base tempo.
-    pub ticks_per_s: u32,
+    pub ms_per_tick: u32,
     pub instruments: Vec<Instrument>,
-    pub notes: Vec<Note>,
+    /// This is indexed by tick, starting at 0.
+    pub notes_by_tick: Vec<NotesStartingThisTick>,
+    pub measures: Vec<Measure>,
     /// Not required, but may help with generation, improvisation etc.
     pub chord_progression: Option<ChordProgression>,
+    /// Default key for notes whose sharp_flat field is None.
+    pub key: Key,
+    pub temperament: Temperament,
 }
 
 impl Composition {
@@ -77,15 +68,20 @@ impl Composition {
         // tick_base: TickBase,
         // tick_base: NoteDurationClass,
         ticks_per_sixteenth_note: u32,
-        ticks_per_s: u32,
+        ms_per_tick: u32,
+        key: Key,
+        temperament: Temperament,
         instruments: Vec<Instrument>,
     ) -> Self {
         Self {
             ticks_per_sixteenth_note,
-            ticks_per_s,
+            ms_per_tick,
             instruments,
-            notes: Vec::new(),
+            notes_by_tick: Vec::new(),
+            measures: Vec::new(),
             chord_progression: None,
+            key,
+            temperament,
         }
     }
 
