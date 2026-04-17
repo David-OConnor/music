@@ -8,12 +8,13 @@ use crate::{player, Key, Note, NoteDurationClass, TimeSignature};
 use crate::instrument::Instrument;
 
 /// A traditional music measure.
+#[derive(Clone)]
 pub struct Measure {
     // todo: Do we want this? For assigning finer divisions to.
     pub ident: u32,
     pub key: Key,
     pub time_signature: TimeSignature,
-    pub tempo: f32, // todo?
+    pub tempo: u32,
 }
 
 impl Measure {

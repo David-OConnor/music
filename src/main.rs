@@ -1,4 +1,4 @@
-use crate::composition::Composition;
+use crate::composition::{Composition, Measure};
 use crate::instrument::Instrument;
 
 mod composition;
@@ -57,6 +57,7 @@ pub enum ChordType {
     Minor,
 }
 
+/// For now, we are not including suspensions: Use a-la-carte Vec<Note> for that.
 #[derive(Clone, Copy, PartialEq)]
 pub enum ChordAugmentation {
     Diminished,
@@ -149,6 +150,7 @@ pub struct KeySharps {
     pub g: SharpFlat,
 }
 
+#[derive(Clone, Copy)]
 pub struct Key {
     pub base_note: NoteLetter,
     pub sharp_flat: SharpFlat,
@@ -203,16 +205,19 @@ impl Key {
     }
 }
 
-// todo: should this be an integer instead?
+/// For representing notes in sheet music, for example. Internally, we use integers to
+/// represent durations.
 #[derive(Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub enum NoteDurationClass {
-    Whole,
-    Half,
-    Quarter,
-    Eighth,
-    Sixteenth,
-    ThirtySecond,
-    SixtyFourth,
+    Whole = 1,
+    Half = 2,
+    Quarter = 4,
+    Eighth = 8,
+    Sixteenth = 16,
+    ThirtySecond = 32,
+    SixtyFourth = 64,
+    OneTwentyEighth = 128,
 }
 
 pub struct NotePlayed {
@@ -222,9 +227,16 @@ pub struct NotePlayed {
     pub duration: f32,
 }
 
+#[derive(Clone)]
 pub struct TimeSignature {
     pub numerator: u8,
     pub denominator: u8,
+}
+
+impl TimeSignature {
+    pub fn new(numerator: u8, denominator: u8) -> Self {
+        Self { numerator, denominator }
+    }
 }
 
 pub struct State {
@@ -245,7 +257,26 @@ pub fn make_test_composition() -> Composition {
         instruments
     );
 
-    res.add_measure();
+    let key = Key::new(NoteLetter::C, SharpFlat::Flat);
+    let tempo = 80_000;
+    let sig = TimeSignature::new(6, 8);
+
+    let meas_0 = Measure {
+        ident: 0, // Overwritten after?
+        key,
+        time_signature: sig,
+        tempo,
+    };
+
+    let meas_1 = meas_0.clone();
+
+    let measures = vec![
+        meas_0, meas_1
+    ];
+
+    for m in measures {
+        res.add_measure(m);
+    }
 
     res
 }
