@@ -1,5 +1,10 @@
+use crate::composition::Composition;
+use crate::instrument::Instrument;
+
 mod composition;
 mod instrument;
+mod player;
+mod decomposition;
 
 /// All integer times are in ms. All frequencies are in Hz.
 
@@ -226,6 +231,29 @@ pub struct State {
     pub compositions: Vec<Composition>,
 }
 
+/// We are using this to develop our data structures.
+/// The opening of *Alicia* from the Expedition 33 sound track.
+pub fn make_test_composition() -> Composition {
+    let instruments = vec![
+        Instrument::Violin, // Treble clef
+        Instrument::BassGuitar,
+    ];
+
+    let mut res = Composition::new(
+        NoteDurationClass::Quarter,
+        80_000,
+        instruments
+    );
+
+    res.add_measure();
+
+    res
+}
+
+
 fn main() {
-    println!("Hello, world!");
+    let comp = make_test_composition();
+
+    // todo: Implement a way to play this.
+
 }

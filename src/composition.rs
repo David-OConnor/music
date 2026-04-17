@@ -2,7 +2,10 @@
 //! This does not include more primitive baseline types, but deals with
 //! combining them. This is a fuzzy notion, but helps organize the code.
 
-use crate::{Key, NoteDurationClass, TimeSignature};
+use std::io;
+
+use crate::{player, Key, Note, NoteDurationClass, TimeSignature};
+use crate::instrument::Instrument;
 
 /// A traditional music measure.
 pub struct Measure {
@@ -41,19 +44,36 @@ pub struct Composition {
     pub base_time_duration_class: NoteDurationClass,
     /// Duration of the base class in ms.
     pub base_time_unit: u32,
+    pub instruments: Vec<Instrument>,
+    pub note: Vec<Note>,
 }
 
 impl Composition {
+    /// todo: If there are too many params, add a config struct.
+    pub fn new(
+        base_time_duration_class: NoteDurationClass,
+        base_time_unit: u32,
+        instruments: Vec<Instrument>
+    ) -> Self {
+
+        Self {
+            base_time_duration_class,
+            base_time_unit,
+            instruments,
+            note: Vec::new()
+        }
+    }
+
+    pub fn add_measure(&mut self, measure: Measure) {
+
+    }
+
     pub fn make_micromeasures(&self) -> Vec<MicroMeasure> {
         vec![]
     }
-}
 
-/// We are using this develop our data structures.
-/// The opening of *Alicia* from the Expedition 33 sound track.
-pub fn make_test_composition() -> Composition {
-    Composition {
-        base_time_duration_class: NoteDurationClass::Quarter,
-        base_time_unit: 1000,
+    pub fn play(&self) -> io::Result<()> {
+        player::play(self)
     }
 }
+
