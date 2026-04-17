@@ -4,8 +4,10 @@
 
 use std::io;
 
-use crate::{player, Key, Note, NoteDurationClass, TimeSignature};
-use crate::instrument::Instrument;
+use crate::{
+    ChordProgression, Key, Note, NoteDuration, NoteDurationClass, TimeSignature,
+    instrument::Instrument, player,
+};
 
 /// A traditional music measure.
 #[derive(Clone)]
@@ -33,48 +35,71 @@ pub struct MicroMeasure {
     pub duration: u32,
 }
 
+// /// Used for anchoring note durations to discrete time ticks.
+// /// If note_class = NoteDuration::Eigth, and tick_time is 200ms, and eigth note is
+// /// 200ms, and there can be no sixteenth notes.
+// pub struct TickBase {
+//     /// This note duration is which note is tick_time in real time units.
+//     /// Finest duration in the set.
+//     pub note_class: NoteDurationClass,
+//     /// ms
+//     pub tick_time: u32,
+// }
+
+// impl TickBase {
+//     pub fn new(note_class: NoteDurationClass, tick_time: u32) -> Self {
+//         Self { note_class, tick_time }
+//     }
+// }
+
 /// A top level structure representing an entire work, with all its details.
 /// We are starting using the basics you would use to build a sheet music with,
 /// and are expanding it to be more general, so as not to be restricted to traditional
 /// western music conventions.
 pub struct Composition {
-    /// The base time here is used to set the tempo of the composition.
-    /// The specifics of how this is set don't restrict the piece, and are changeable.
-    /// This is used as a relative grounding.
-    /// todo: You may wish to decouple this from the notation notes.
-    pub base_time_duration_class: NoteDurationClass,
-    /// Duration of the base class in ms.
-    pub base_time_unit: u32,
+    // pub tick_base: TickBase,
+    // pub tick_base: NoteDurationClass,
+    /// We use this to scale the NoteDurationClass (16th notes, 8th notes etc) with
+    /// the underlying integer tick system. Set to 1 if there is truly no time interval
+    /// finer than a 16th note.
+    pub ticks_per_sixteenth_note: u32,
+    /// This is the base tempo.
+    pub ticks_per_s: u32,
     pub instruments: Vec<Instrument>,
-    pub note: Vec<Note>,
+    pub notes: Vec<Note>,
+    /// Not required, but may help with generation, improvisation etc.
+    pub chord_progression: Option<ChordProgression>,
 }
 
 impl Composition {
     /// todo: If there are too many params, add a config struct.
     pub fn new(
-        base_time_duration_class: NoteDurationClass,
-        base_time_unit: u32,
-        instruments: Vec<Instrument>
+        // tick_base: TickBase,
+        // tick_base: NoteDurationClass,
+        ticks_per_sixteenth_note: u32,
+        ticks_per_s: u32,
+        instruments: Vec<Instrument>,
     ) -> Self {
-
         Self {
-            base_time_duration_class,
-            base_time_unit,
+            ticks_per_sixteenth_note,
+            ticks_per_s,
             instruments,
-            note: Vec::new()
+            notes: Vec::new(),
+            chord_progression: None,
         }
     }
 
-    pub fn add_measure(&mut self, measure: Measure) {
-
-    }
+    pub fn add_measure(&mut self, measure: Measure) {}
 
     pub fn make_micromeasures(&self) -> Vec<MicroMeasure> {
         vec![]
+    }
+
+    pub fn make_sheet_music(&self) {
+        unimplemented!()
     }
 
     pub fn play(&self) -> io::Result<()> {
         player::play(self)
     }
 }
-
