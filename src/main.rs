@@ -45,7 +45,7 @@ pub fn make_test_composition() -> Composition {
         Instrument::BassGuitar,
     ];
 
-    let key = Key::new(C, SharpFlat::Flat, MajorMinor::Minor);
+    let key = Key::new(C, SharpFlat::Natural, MajorMinor::Minor);
     let ms_per_tick = 400;
 
     let mut res = Composition::new(
@@ -94,6 +94,7 @@ pub fn make_test_composition() -> Composition {
     // todo: How do we assign an instrument?
     // todo: Currently we could play this sequentially.
     let notes_m0 = vec![
+        // M1
         NotesStartingThisTick {
             notes: vec![new_e(C, 3), new_e(C, 6)],
         },
@@ -101,10 +102,7 @@ pub fn make_test_composition() -> Composition {
             notes: vec![new_e(G, 3), new_e(G, 5)],
         },
         NotesStartingThisTick {
-            notes: vec![
-                new_e(C, 4),
-                new_h(F, 5),
-            ],
+            notes: vec![new_e(C, 4), new_h(F, 5)],
         },
         NotesStartingThisTick {
             notes: vec![new_e(D, 4)],
@@ -112,15 +110,13 @@ pub fn make_test_composition() -> Composition {
         NotesStartingThisTick {
             notes: vec![new_q(E, 4)],
         },
-
         NotesStartingThisTick::empty(),
-
-        // Measure ------------
+        // Measure 2 ------------
         NotesStartingThisTick {
-            notes: vec![new_e(C, 3), new_e(D, 6)],
+            notes: vec![new_e(C, 3), new_e(C, 6)],
         },
         NotesStartingThisTick {
-            notes: vec![new_e(G, 3), new_e(B, 6)],
+            notes: vec![new_e(G, 3), new_e(B, 5)],
         },
         NotesStartingThisTick {
             notes: vec![new_e(D, 4), new_h(E, 5)],
@@ -131,12 +127,63 @@ pub fn make_test_composition() -> Composition {
         NotesStartingThisTick {
             notes: vec![new_q(F, 4)],
         },
-
         NotesStartingThisTick::empty(),
-
-        // Measure ------------
-
-
+        // Measure 3 ------------
+        NotesStartingThisTick {
+            notes: vec![new_e(C, 3), new_e(G, 5)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(G, 3), new_e(F, 5)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(C, 4), new_h(A, 4)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(D, 4)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(E, 4)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(F, 4)],
+        },
+        // Measure 4 ------------
+        NotesStartingThisTick {
+            notes: vec![new_e(C, 3), new_e(E, 4), new_e(E, 5)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(G, 3), new_e(D, 5)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(C, 4), new_e(G, 4)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(E, 4), new_e(E, 5)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(D, 4), new_e(D, 5)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(E, 4), new_e(E, 5)],
+        },
+        // Measure 5 ------------
+        NotesStartingThisTick {
+            notes: vec![new_e(F, 2), new_q(A, 4), new_q(C, 5), new_q(G, 5)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(C, 3)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_e(F, 3), new_e(E, 4)],
+        },
+        NotesStartingThisTick {
+            // todo: The F here should be q + e, but we don't support that.
+            notes: vec![new_e(G, 4), new_q(F, 5)],
+        },
+        NotesStartingThisTick {
+            notes: vec![new_q(A, 4)],
+        },
+        NotesStartingThisTick::empty(),
     ];
 
     // let meas_1 = meas_0.clone();

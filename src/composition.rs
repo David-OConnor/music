@@ -35,7 +35,9 @@ pub struct NotesStartingThisTick {
 }
 
 impl NotesStartingThisTick {
-    pub fn empty() -> Self { Self {notes: Vec::new() } }
+    pub fn empty() -> Self {
+        Self { notes: Vec::new() }
+    }
 }
 
 /// A top level structure representing an entire work, with all its details.

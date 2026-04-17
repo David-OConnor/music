@@ -73,8 +73,8 @@ impl Key {
     }
 
     fn signature_count(&self) -> i8 {
-        use MajorMinor::*;
         use crate::note::NoteLetter::*;
+        use MajorMinor::*;
 
         let natural_count = match self.major_minor {
             Major => match self.base_note {
@@ -132,9 +132,25 @@ impl Key {
 
         let clamped = count.clamp(-7, 7);
         let letters = if clamped >= 0 {
-            [('f', Sharp), ('c', Sharp), ('g', Sharp), ('d', Sharp), ('a', Sharp), ('e', Sharp), ('b', Sharp)]
+            [
+                ('f', Sharp),
+                ('c', Sharp),
+                ('g', Sharp),
+                ('d', Sharp),
+                ('a', Sharp),
+                ('e', Sharp),
+                ('b', Sharp),
+            ]
         } else {
-            [('b', Flat), ('e', Flat), ('a', Flat), ('d', Flat), ('g', Flat), ('c', Flat), ('f', Flat)]
+            [
+                ('b', Flat),
+                ('e', Flat),
+                ('a', Flat),
+                ('d', Flat),
+                ('g', Flat),
+                ('c', Flat),
+                ('f', Flat),
+            ]
         };
 
         for (letter, accidental) in letters.iter().take(clamped.unsigned_abs() as usize) {

@@ -10,7 +10,7 @@ use crate::{
 
 /// For representing notes in sheet music, for example. Internally, we use integers to
 /// represent durations.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum NoteDurationClass {
     Whole = 1,
@@ -24,7 +24,7 @@ pub enum NoteDurationClass {
 }
 
 /// All integer times are in ms. All frequencies are in Hz.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NoteLetter {
     A,
     B,
@@ -46,28 +46,10 @@ pub struct Note {
 }
 
 impl Note {
-    pub fn frequency(&self, key: Key, temperament: Temperament) -> f32 {
+    fn natural_semitone(letter: NoteLetter) -> i32 {
         use NoteLetter::*;
 
-        use crate::measure::SharpFlat::*;
-
-        let sf = match self.sharp_flat {
-            Some(sf) => sf,
-            None => {
-                let ks = key.get_sharps_flats();
-                match self.letter {
-                    A => ks.a,
-                    B => ks.b,
-                    C => ks.c,
-                    D => ks.d,
-                    E => ks.e,
-                    F => ks.f,
-                    G => ks.g,
-                }
-            }
-        };
-
-        let semitone_in_octave = match self.letter {
+        match letter {
             C => 0,
             D => 2,
             E => 4,
@@ -75,35 +57,65 @@ impl Note {
             G => 7,
             A => 9,
             B => 11,
-        } + match sf {
-            Sharp => 1,
-            Flat => -1,
-            Natural => 0,
-        };
+        }
+    }
+
+    fn accidental_for_key(letter: NoteLetter, key: Key) -> SharpFlat {
+        use NoteLetter::*;
+
+        let ks = key.get_sharps_flats();
+        match letter {
+            A => ks.a,
+            B => ks.b,
+            C => ks.c,
+            D => ks.d,
+            E => ks.e,
+            F => ks.f,
+            G => ks.g,
+        }
+    }
+
+    fn midi_note(letter: NoteLetter, sharp_flat: SharpFlat, octave: u8) -> i32 {
+        use crate::measure::SharpFlat::*;
+
+        let semitone_in_octave = Self::natural_semitone(letter)
+            + match sharp_flat {
+                Sharp => 1,
+                Flat => -1,
+                Natural => 0,
+            };
 
         // MIDI note: C4 = 60, A4 = 69
-        let midi = (self.octave as i32 + 1) * 12 + semitone_in_octave;
+        (octave as i32 + 1) * 12 + semitone_in_octave
+    }
+
+    fn midi_frequency(midi: i32) -> f32 {
+        (440.0_f64 * 2.0_f64.powf((midi - 69) as f64 / 12.0)) as f32
+    }
+
+    pub fn frequency(&self, key: Key, temperament: Temperament) -> f32 {
+        use crate::measure::SharpFlat::*;
+
+        let sf = match self.sharp_flat {
+            Some(sf) => sf,
+            None => Self::accidental_for_key(self.letter, key),
+        };
+
+        let midi = Self::midi_note(self.letter, sf, self.octave);
 
         match temperament {
-            Temperament::Even => 440.0 * 2f32.powf((midi - 69) as f32 / 12.0),
+            Temperament::Even => Self::midi_frequency(midi),
             Temperament::WellTempered(wt_key) => {
-                let tonic_pc = match wt_key.base_note {
-                    C => 0i32,
-                    D => 2,
-                    E => 4,
-                    F => 5,
-                    G => 7,
-                    A => 9,
-                    B => 11,
-                } + match wt_key.sharp_flat {
-                    Sharp => 1,
-                    Flat => -1,
-                    Natural => 0,
-                };
+                let tonic_pc = Self::natural_semitone(wt_key.base_note)
+                    + match wt_key.sharp_flat {
+                        Sharp => 1,
+                        Flat => -1,
+                        Natural => 0,
+                    };
 
                 let interval = (midi - tonic_pc).rem_euclid(12) as usize;
                 let tonic_midi = midi - interval as i32;
-                let tonic_freq = 440.0 * 2f32.powf((tonic_midi - 69) as f32 / 12.0);
+                let tonic_freq = Self::midi_frequency(tonic_midi);
 
                 // Just intonation ratios from tonic
                 let ratio: f32 = [
@@ -124,6 +136,127 @@ impl Note {
                 tonic_freq * ratio
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Note, NoteDuration, NoteDurationClass, NoteLetter};
+    use crate::{
+        measure::{Key, MajorMinor, SharpFlat},
+        overtones::Temperament,
+    };
+
+    fn note(letter: NoteLetter, sharp_flat: Option<SharpFlat>, octave: u8) -> Note {
+        Note {
+            letter,
+            sharp_flat,
+            octave,
+            duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
+            amplitude: 1.0,
+        }
+    }
+
+    fn assert_close(actual: f32, expected: f32, tolerance: f32) {
+        let diff = (actual - expected).abs();
+        assert!(
+            diff <= tolerance,
+            "expected {expected} Hz, got {actual} Hz (diff {diff})"
+        );
+    }
+
+    #[test]
+    fn equal_temperament_matches_reference_a4() {
+        let a4 = note(NoteLetter::A, Some(SharpFlat::Natural), 4);
+
+        assert_close(
+            a4.frequency(
+                Key::new(NoteLetter::C, SharpFlat::Natural, MajorMinor::Major),
+                Temperament::Even,
+            ),
+            440.0,
+            0.0001,
+        );
+    }
+
+    #[test]
+    fn equal_temperament_handles_cross_octave_accidentals() {
+        let c4 = note(NoteLetter::C, Some(SharpFlat::Natural), 4);
+        let b_sharp_3 = note(NoteLetter::B, Some(SharpFlat::Sharp), 3);
+        let b3 = note(NoteLetter::B, Some(SharpFlat::Natural), 3);
+        let c_flat_4 = note(NoteLetter::C, Some(SharpFlat::Flat), 4);
+        let key = Key::new(NoteLetter::C, SharpFlat::Natural, MajorMinor::Major);
+
+        assert_close(
+            b_sharp_3.frequency(key, Temperament::Even),
+            c4.frequency(key, Temperament::Even),
+            0.0001,
+        );
+        assert_close(
+            c_flat_4.frequency(key, Temperament::Even),
+            b3.frequency(key, Temperament::Even),
+            0.0001,
+        );
+    }
+
+    #[test]
+    fn well_tempered_perfect_fifth_uses_the_expected_ratio() {
+        let key = Key::new(NoteLetter::C, SharpFlat::Natural, MajorMinor::Major);
+        let c4 = note(NoteLetter::C, Some(SharpFlat::Natural), 4);
+        let g4 = note(NoteLetter::G, Some(SharpFlat::Natural), 4);
+        let c4_freq = c4.frequency(key, Temperament::Even);
+
+        assert_close(
+            g4.frequency(key, Temperament::WellTempered(key)),
+            c4_freq * (3.0 / 2.0),
+            0.001,
+        );
+    }
+
+    #[test]
+    fn missing_accidental_uses_major_key_signature() {
+        let key = Key::new(NoteLetter::F, SharpFlat::Natural, MajorMinor::Major);
+        let note_from_key = note(NoteLetter::B, None, 4);
+        let explicit_b_flat = note(NoteLetter::B, Some(SharpFlat::Flat), 4);
+
+        assert_close(
+            note_from_key.frequency(key, Temperament::Even),
+            explicit_b_flat.frequency(key, Temperament::Even),
+            0.0001,
+        );
+    }
+
+    #[test]
+    fn missing_accidental_uses_minor_key_signature() {
+        let key = Key::new(NoteLetter::B, SharpFlat::Flat, MajorMinor::Minor);
+        let note_from_key = note(NoteLetter::D, None, 4);
+        let explicit_d_flat = note(NoteLetter::D, Some(SharpFlat::Flat), 4);
+
+        assert_close(
+            note_from_key.frequency(key, Temperament::Even),
+            explicit_d_flat.frequency(key, Temperament::Even),
+            0.0001,
+        );
+    }
+
+    #[test]
+    fn explicit_natural_overrides_key_signature() {
+        let key = Key::new(NoteLetter::G, SharpFlat::Natural, MajorMinor::Major);
+        let from_key = note(NoteLetter::F, None, 4);
+        let explicit_natural = note(NoteLetter::F, Some(SharpFlat::Natural), 4);
+        let explicit_sharp = note(NoteLetter::F, Some(SharpFlat::Sharp), 4);
+
+        assert_close(
+            from_key.frequency(key, Temperament::Even),
+            explicit_sharp.frequency(key, Temperament::Even),
+            0.0001,
+        );
+        assert!(
+            (explicit_natural.frequency(key, Temperament::Even)
+                - explicit_sharp.frequency(key, Temperament::Even))
+            .abs()
+                > 1.0
+        );
     }
 }
 
@@ -198,9 +331,7 @@ impl Chord {
                     _ => unreachable!(),
                 };
 
-                // todo: Huh?
-                // let octave = (self.octave as i32 + abs / 12) as u8;
-                let octave = self.octave;
+                let octave = (self.octave as i32 + abs.div_euclid(12)) as u8;
 
                 Note {
                     letter,
@@ -211,6 +342,39 @@ impl Chord {
                 }
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod chord_tests {
+    use super::{Chord, ChordType, NoteDuration, NoteDurationClass, NoteLetter};
+    use crate::measure::SharpFlat;
+
+    #[test]
+    fn chord_notes_roll_into_the_next_octave_when_needed() {
+        let chord = Chord {
+            base: NoteLetter::B,
+            chord_type: ChordType::Major,
+            augmentation: None,
+            octave: 3,
+            duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
+            amplitude: 1.0,
+        };
+
+        let notes = chord.notes();
+
+        assert_eq!(notes.len(), 3);
+        assert_eq!(notes[0].letter, NoteLetter::B);
+        assert_eq!(notes[0].sharp_flat, Some(SharpFlat::Natural));
+        assert_eq!(notes[0].octave, 3);
+
+        assert_eq!(notes[1].letter, NoteLetter::D);
+        assert_eq!(notes[1].sharp_flat, Some(SharpFlat::Sharp));
+        assert_eq!(notes[1].octave, 4);
+
+        assert_eq!(notes[2].letter, NoteLetter::F);
+        assert_eq!(notes[2].sharp_flat, Some(SharpFlat::Sharp));
+        assert_eq!(notes[2].octave, 4);
     }
 }
 
