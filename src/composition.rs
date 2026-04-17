@@ -1,0 +1,59 @@
+//! Contains data structures which represent a composition broadly.
+//! This does not include more primitive baseline types, but deals with
+//! combining them. This is a fuzzy notion, but helps organize the code.
+
+use crate::{Key, NoteDurationClass, TimeSignature};
+
+/// A traditional music measure.
+pub struct Measure {
+    // todo: Do we want this? For assigning finer divisions to.
+    pub ident: u32,
+    pub key: Key,
+    pub time_signature: TimeSignature,
+    pub tempo: f32, // todo?
+}
+
+impl Measure {
+    pub fn to_micro_measure(&self) -> Vec<MicroMeasure> {
+        let mut res = Vec::new();
+
+        res
+    }
+}
+
+/// Describes all actions at the coarsest time granularity which can describe a given instant.
+/// It describes everything which is happening at thi state. When used to play a composition,
+/// for example, this is what is generated. We compose this from coarser constructs.
+pub struct MicroMeasure {
+    /// ms. We use the largest
+    pub duration: u32,
+}
+
+/// A top level structure representing an entire work, with all its details.
+/// We are starting using the basics you would use to build a sheet music with,
+/// and are expanding it to be more general, so as not to be restricted to traditional
+/// western music conventions.
+pub struct Composition {
+    /// The base time here is used to set the tempo of the composition.
+    /// The specifics of how this is set don't restrict the piece, and are changeable.
+    /// This is used as a relative grounding.
+    /// todo: You may wish to decouple this from the notation notes.
+    pub base_time_duration_class: NoteDurationClass,
+    /// Duration of the base class in ms.
+    pub base_time_unit: u32,
+}
+
+impl Composition {
+    pub fn make_micromeasures(&self) -> Vec<MicroMeasure> {
+        vec![]
+    }
+}
+
+/// We are using this develop our data structures.
+/// The opening of *Alicia* from the Expedition 33 sound track.
+pub fn make_test_composition() -> Composition {
+    Composition {
+        base_time_duration_class: NoteDurationClass::Quarter,
+        base_time_unit: 1000,
+    }
+}
