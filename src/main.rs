@@ -1,23 +1,24 @@
 use std::path::Path;
+
 use key_scale::{Key, MajorMinor, SharpFlat};
+use musicxml::datatypes::KindValue::MajorMinor;
 
 use crate::{
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
-    make_base_music::make_bassline_roots,
-    measure::TimeSignature,
+    make_bass_music::{make_bassline_ascending, make_bassline_roots},
+    measure::{Measure, TimeSignature},
     note::{Note, NoteLetter},
     overtones::Temperament,
+    sheet_music::MusicXmlFormat,
 };
-use crate::measure::Measure;
-use crate::sheet_music::MusicXmlFormat;
 
 mod composition;
 mod decomposition;
 mod generation;
 mod instrument;
 mod key_scale;
-mod make_base_music;
+mod make_bass_music;
 mod measure;
 mod note;
 mod overtones;
@@ -184,14 +185,6 @@ pub fn make_test_composition() -> Composition {
         NotesStartingThisTick::empty(),
     ];
 
-    // let meas_1 = meas_0.clone();
-    //
-    // let measures = vec![meas_0, meas_1];
-    //
-    // for m in measures {
-    //     res.add_measure(m);
-    // }
-
     for note in notes_m0 {
         res.notes_by_tick.push(note);
     }
@@ -199,17 +192,26 @@ pub fn make_test_composition() -> Composition {
     res
 }
 
-fn make_test_baseline() -> Composition {
+fn make_test_bassline() -> Composition {
     use crate::{
+        key_scale::{MajorMinor, SharpFlat::*},
         note::{Chord, ChordType::*, NoteLetter::*},
     };
 
-    let key = Key::new(C, SharpFlat::Natural, MajorMinor::Major);
+    // let root = C;
+
+    let root_note = Note::new(C, Some(Sharp), 3);
+    // let maj_minor = MajorMinor::Minor;
+
+    let key = Key::new(root_note.letter, Sharp, MajorMinor::Minor);
     let sig = TimeSignature::new(4, 4);
 
-    let chord_c = Chord::new(C, Major, None, 3);
-    let chord_f = Chord::new(F, Major, None, 3);
-    let chord_g = Chord::new(G, Major, None, 3);
+    let fourth = root_note.add_interval(4);
+    let fifth = root_note.add_interval(6);
+
+    let chord_c = Chord::new(root_note, Major, None);
+    let chord_f = Chord::new(fourth, Major, None);
+    let chord_g = Chord::new(fifth, Major, None);
 
     let measures = vec![
         Measure::new(key, sig, Some(chord_c.clone()), 100),
@@ -226,12 +228,13 @@ fn make_test_baseline() -> Composition {
         Measure::new(key, sig, Some(chord_f.clone()), 100),
     ];
 
-    // let notes = make_bassline_ascending(&prog);
-    let notes = make_bassline_roots(&measures);
+    // let notes = make_bassline_ascending(&measures, 1);
+    // let notes = make_bassline_roots(&measures, 1);
+    let notes = make_bassline_ascending(&measures, 1);
 
     let mut comp = Composition::new(
         1,
-        500,
+        100,
         key,
         Temperament::WellTempered(key),
         vec![Instrument::BassGuitar],
@@ -242,18 +245,18 @@ fn make_test_baseline() -> Composition {
     }
 
     comp.notes_by_tick = notes;
-    // comp.chord_progression = Some(prog);
+    comp.measures = measures;
 
     comp
 }
 
 fn main() {
     // let comp = make_test_composition();
-    let comp = make_test_baseline();
+    let comp = make_test_bassline();
 
     let test_path = Path::new("./sheet_music.musicxml");
 
-    sheet_music::write_sheet_music(&comp, MusicXmlFormat::Raw,  &test_path).unwrap();
+    sheet_music::write_sheet_music(&comp, MusicXmlFormat::Raw, &test_path).unwrap();
 
     comp.play().unwrap();
 }

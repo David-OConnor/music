@@ -9,6 +9,7 @@ use std::{
 
 use crate::{
     key_scale::{Key, SharpFlat},
+    note::NoteLetter::{A, B, C, D, E, F, G},
     overtones::Temperament,
 };
 
@@ -144,7 +145,7 @@ pub struct Note {
 }
 
 impl Display for Note {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let sf = match self.sharp_flat {
             Some(SharpFlat::Sharp) => "#",
             Some(SharpFlat::Flat) => "♭",
@@ -161,6 +162,11 @@ impl Note {
             sharp_flat,
             octave,
         }
+    }
+
+    /// E.g C# + 2 = D#. G-flat + 3 = A.
+    pub fn add_interval(&self, interval: u8) -> Self {
+        // todo: Fill this out.
     }
 }
 
@@ -410,24 +416,24 @@ pub enum ChordAugmentation {
 
 #[derive(Clone)]
 pub struct Chord {
-    pub root: NoteLetter,
+    pub root: Note,
     pub chord_type: ChordType,
     pub augmentation: Option<ChordAugmentation>,
-    pub octave: u8,
+    // pub octave: u8,
 }
 
 impl Chord {
     pub fn new(
-        root: NoteLetter,
+        root: Note,
         chord_type: ChordType,
         augmentation: Option<ChordAugmentation>,
-        octave: u8,
+        // octave: u8,
     ) -> Self {
         Self {
             root,
             chord_type,
             augmentation,
-            octave,
+            // octave,
         }
     }
 }
@@ -450,7 +456,7 @@ impl Chord {
             (Minor, Some(Augmented)) => [0, 3, 8],
         };
 
-        let base_semitone = match self.root {
+        let base_semitone = match self.root.letter {
             C => 0,
             D => 2,
             E => 4,

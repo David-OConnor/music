@@ -15,12 +15,18 @@ pub struct Measure {
     pub key: Key,
     pub time_signature: TimeSignature,
     pub tempo: u32,
-    pub chord: Option<Chord>
+    pub chord: Option<Chord>,
 }
 
 impl Measure {
     pub fn new(key: Key, time_signature: TimeSignature, chord: Option<Chord>, tempo: u32) -> Self {
-        Self {ident: 0, key, time_signature, chord, tempo}
+        Self {
+            ident: 0,
+            key,
+            time_signature,
+            chord,
+            tempo,
+        }
     }
 }
 

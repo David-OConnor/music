@@ -16,7 +16,7 @@ use crate::{
     instrument::Instrument,
     key_scale::{Key, MajorMinor, SharpFlat},
     measure::TimeSignature,
-    note::{NoteDuration, NoteDurationClass, NoteLetter, Note, NotePlayed},
+    note::{Note, NoteDuration, NoteDurationClass, NoteLetter, NotePlayed},
     overtones::Temperament,
 };
 
@@ -99,8 +99,14 @@ fn alter_to_sharp_flat(alter: Option<&mx::Alter>) -> Option<SharpFlat> {
 fn key_to_fifths(key: Key) -> i8 {
     let ks = key.get_sharps_flats();
     let accidentals = [ks.f, ks.c, ks.g, ks.d, ks.a, ks.e, ks.b];
-    let sharps = accidentals.iter().filter(|&&sf| sf == SharpFlat::Sharp).count() as i8;
-    let flats = accidentals.iter().filter(|&&sf| sf == SharpFlat::Flat).count() as i8;
+    let sharps = accidentals
+        .iter()
+        .filter(|&&sf| sf == SharpFlat::Sharp)
+        .count() as i8;
+    let flats = accidentals
+        .iter()
+        .filter(|&&sf| sf == SharpFlat::Flat)
+        .count() as i8;
     sharps - flats
 }
 
@@ -150,7 +156,9 @@ fn duration_class_to_type_value(class: NoteDurationClass) -> mxd::NoteTypeValue 
     match class {
         NoteDurationClass::Whole => mxd::NoteTypeValue::Whole,
         NoteDurationClass::Half | NoteDurationClass::HalfDotted => mxd::NoteTypeValue::Half,
-        NoteDurationClass::Quarter | NoteDurationClass::QuarterDotted => mxd::NoteTypeValue::Quarter,
+        NoteDurationClass::Quarter | NoteDurationClass::QuarterDotted => {
+            mxd::NoteTypeValue::Quarter
+        }
         NoteDurationClass::Eighth | NoteDurationClass::EithDotted => mxd::NoteTypeValue::Eighth,
         NoteDurationClass::Sixteenth | NoteDurationClass::SixteenthDotted => {
             mxd::NoteTypeValue::Sixteenth
@@ -559,7 +567,11 @@ fn build_measure_notes(
 
 fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
     let part_id = "P1";
-    let instr = comp.instruments.first().copied().unwrap_or(Instrument::Piano);
+    let instr = comp
+        .instruments
+        .first()
+        .copied()
+        .unwrap_or(Instrument::Piano);
     let dpq = divs_per_quarter(comp.ticks_per_sixteenth_note);
 
     let part_list = mx::PartList {
@@ -615,7 +627,8 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
     } else {
         let mut tick_start = 0;
         for (i, measure) in comp.measures.iter().enumerate() {
-            let tick_count = ticks_per_measure(&measure.time_signature, comp.ticks_per_sixteenth_note);
+            let tick_count =
+                ticks_per_measure(&measure.time_signature, comp.ticks_per_sixteenth_note);
             let mut measure_content = vec![];
             if i == 0 {
                 let attrs = make_measure_attrs(comp.key, &measure.time_signature, instr, dpq);
@@ -709,7 +722,13 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
     // At 120 BPM: 500 ms per quarter note / dpq divisions per quarter = ms per division (= tick)
     let ms_per_tick = (500 / dpq).max(1);
 
-    let mut comp = Composition::new(ticks_per_sixteenth, ms_per_tick, key, Temperament::Even, vec![]);
+    let mut comp = Composition::new(
+        ticks_per_sixteenth,
+        ms_per_tick,
+        key,
+        Temperament::Even,
+        vec![],
+    );
 
     // Extract notes from all parts, accumulating ticks globally
     for part in &score.content.part {
@@ -731,26 +750,35 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
 
                                     // Prefer the notated type element; fall back to raw tick count
                                     let duration = if let Some(type_el) = &note.content.r#type {
-                                        let class =
-                                            type_value_to_duration_class(&type_el.content);
+                                        let class = type_value_to_duration_class(&type_el.content);
                                         let has_dot = !note.content.dot.is_empty();
                                         if has_dot {
                                             match class {
-                                                NoteDurationClass::Half => NoteDuration::Traditional(
-                                                    NoteDurationClass::HalfDotted,
-                                                ),
-                                                NoteDurationClass::Quarter => NoteDuration::Traditional(
-                                                    NoteDurationClass::QuarterDotted,
-                                                ),
-                                                NoteDurationClass::Eighth => NoteDuration::Traditional(
-                                                    NoteDurationClass::EithDotted,
-                                                ),
-                                                NoteDurationClass::Sixteenth => NoteDuration::Traditional(
-                                                    NoteDurationClass::SixteenthDotted,
-                                                ),
-                                                NoteDurationClass::ThirtySecond => NoteDuration::Traditional(
-                                                    NoteDurationClass::ThirtySecondDotted,
-                                                ),
+                                                NoteDurationClass::Half => {
+                                                    NoteDuration::Traditional(
+                                                        NoteDurationClass::HalfDotted,
+                                                    )
+                                                }
+                                                NoteDurationClass::Quarter => {
+                                                    NoteDuration::Traditional(
+                                                        NoteDurationClass::QuarterDotted,
+                                                    )
+                                                }
+                                                NoteDurationClass::Eighth => {
+                                                    NoteDuration::Traditional(
+                                                        NoteDurationClass::EithDotted,
+                                                    )
+                                                }
+                                                NoteDurationClass::Sixteenth => {
+                                                    NoteDuration::Traditional(
+                                                        NoteDurationClass::SixteenthDotted,
+                                                    )
+                                                }
+                                                NoteDurationClass::ThirtySecond => {
+                                                    NoteDuration::Traditional(
+                                                        NoteDurationClass::ThirtySecondDotted,
+                                                    )
+                                                }
                                                 _ => NoteDuration::Ticks(dur_divs as u32),
                                             }
                                         } else {
@@ -796,7 +824,11 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
 
 // --- Public API ---
 
-pub fn write_sheet_music(comp: &Composition, format: MusicXmlFormat, path: &Path) -> io::Result<()> {
+pub fn write_sheet_music(
+    comp: &Composition,
+    format: MusicXmlFormat,
+    path: &Path,
+) -> io::Result<()> {
     let path_str = path
         .to_str()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "non-UTF-8 path"))?;
