@@ -1,58 +1,127 @@
 //! Experimenting in generating music.
 
-use crate::composition::NotesStartingThisTick;
-use crate::measure::ChordProgression;
-use crate::note::{Note, NoteDuration, NoteDurationClass, NotePlayed};
+use rand::RngExt;
 
-use rand::Rng;
+use crate::{
+    composition::NotesStartingThisTick,
+    key_scale::SharpFlat,
+    measure::{ChordProgression, TimeSignature},
+    note::{Note, NoteDuration, NoteDurationClass, NotePlayed},
+};
 
-/// Quarter notes of the chord's root note.
-pub fn make_bassline_roots(prog: &ChordProgression) -> Vec<NotesStartingThisTick> {
+const AMPLITUDE: f32 = 0.2;
+
+fn beat_duration(denominator: u8) -> NoteDurationClass {
+    match denominator {
+        1 => NoteDurationClass::Whole,
+        2 => NoteDurationClass::Half,
+        4 => NoteDurationClass::Quarter,
+        8 => NoteDurationClass::Eighth,
+        16 => NoteDurationClass::Sixteenth,
+        32 => NoteDurationClass::ThirtySecond,
+        64 => NoteDurationClass::SixtyFourth,
+        128 => NoteDurationClass::OneTwentyEighth,
+        _ => NoteDurationClass::Quarter,
+    }
+}
+
+/// One beat-note of the chord's root per beat, filling the full measure.
+/// E.g. 4/4 → 4 quarter notes; 6/8 → 6 eighth notes.
+pub fn make_bassline_roots(
+    prog: &ChordProgression,
+    time_sig: TimeSignature,
+) -> Vec<NotesStartingThisTick> {
     let mut res = Vec::new();
+    let octaves = [2u8, 3, 4];
 
-    // Choose root notes etc from these octaves;
-    let octaves = [1, 2, 3];
-    let amplitude = 1.;
+    let mut rng = rand::rng();
+    let duration = NoteDuration::Traditional(beat_duration(time_sig.denominator));
 
     for (subset_i, reps) in &prog.sets {
         let subset = &prog.subsets[*subset_i];
-
         for _ in 0..*reps {
             for chord in subset {
-                let octave: u8 = Rng::get(octaves); // todo: Syntax.
-
-                res.push(NotesStartingThisTick {
-                    notes: vec![
-                        NotePlayed {
-                            // todo: get sharp_flat.
-                            note: Note::new(chord.root, sharp_flat, octave),
-                            duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
-                            amplitude
-                        }
-                    ]
-                })
+                let octave = octaves[rng.random_range(0..octaves.len())];
+                let note = Note::new(chord.root, Some(SharpFlat::Natural), octave);
+                for _ in 0..time_sig.numerator {
+                    res.push(NotesStartingThisTick {
+                        notes: vec![NotePlayed {
+                            note: note.clone(),
+                            duration,
+                            amplitude: AMPLITUDE,
+                        }],
+                    });
+                }
             }
         }
     }
 
+    res
+}
+
+/// Cycles through the chord's notes ascending, one per beat, filling the measure.
+/// E.g. 4/4 with a triad → root, 3rd, 5th, root.
+pub fn make_bassline_ascending(
+    prog: &ChordProgression,
+    time_sig: TimeSignature,
+) -> Vec<NotesStartingThisTick> {
+    let mut res = Vec::new();
+    let amplitude = 0.8;
+    let duration = NoteDuration::Traditional(beat_duration(time_sig.denominator));
+
+    for (subset_i, reps) in &prog.sets {
+        let subset = &prog.subsets[*subset_i];
+        for _ in 0..*reps {
+            for chord in subset {
+                let notes = chord.notes();
+                for beat in 0..time_sig.numerator as usize {
+                    res.push(NotesStartingThisTick {
+                        notes: vec![NotePlayed {
+                            note: notes[beat % notes.len()].clone(),
+                            duration,
+                            amplitude: AMPLITUDE,
+                        }],
+                    });
+                }
+            }
+        }
+    }
 
     res
 }
 
-/// Quarter notes starting at the scale's root each chord change, and incrementing through the chord
-/// notes, ascending.
-pub fn make_bassline_ascending(prog: &ChordProgression) -> Vec<NotesStartingThisTick> {
+/// Random chord notes, one per beat. With `start_at_root`, the first beat of each chord is always the root.
+pub fn make_bassline_random(
+    prog: &ChordProgression,
+    time_sig: TimeSignature,
+    start_at_root: bool,
+) -> Vec<NotesStartingThisTick> {
     let mut res = Vec::new();
+    let mut rng = rand::rng();
+    let duration = NoteDuration::Traditional(beat_duration(time_sig.denominator));
 
-
-    res
-}
-
-/// Quarter notes of random notes in the chord. Can either make it truly random notes in the chord,
-/// or have it start at the root note each time the chord changes.
-pub fn make_bassline_random(prog: &ChordProgression, start_at_root: bool) -> Vec<NotesStartingThisTick> {
-    let mut res = Vec::new();
-
+    for (subset_i, reps) in &prog.sets {
+        let subset = &prog.subsets[*subset_i];
+        for _ in 0..*reps {
+            for chord in subset {
+                let notes = chord.notes();
+                for beat in 0..time_sig.numerator as usize {
+                    let note = if start_at_root && beat == 0 {
+                        notes[0].clone()
+                    } else {
+                        notes[rng.random_range(0..notes.len())].clone()
+                    };
+                    res.push(NotesStartingThisTick {
+                        notes: vec![NotePlayed {
+                            note,
+                            duration,
+                            amplitude: AMPLITUDE,
+                        }],
+                    });
+                }
+            }
+        }
+    }
 
     res
 }

@@ -1,22 +1,25 @@
 use key_scale::{Key, MajorMinor, SharpFlat};
+
 use crate::{
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
-    note::NoteLetter,
+    make_base_music::make_bassline_roots,
+    measure::TimeSignature,
+    note::{Note, NoteLetter},
     overtones::Temperament,
 };
-use crate::note::Note;
 
 mod composition;
 mod decomposition;
 mod generation;
 mod instrument;
+mod key_scale;
+mod make_base_music;
 mod measure;
 mod note;
 mod overtones;
 mod player;
-mod make_base_music;
-mod key_scale;
+mod sheet_music;
 //
 
 // pub struct NotePlayed {
@@ -34,7 +37,7 @@ pub struct State {
 /// The opening of *Alicia* from the Expedition 33 sound track.
 pub fn make_test_composition() -> Composition {
     use measure::TimeSignature;
-    use note::{NotePlayed, NoteDuration, NoteDurationClass::*, NoteLetter::*};
+    use note::{NoteDuration, NoteDurationClass::*, NoteLetter::*, NotePlayed};
 
     let ei = NoteDuration::Traditional(Eighth);
     let qu = NoteDuration::Traditional(Quarter);
@@ -194,7 +197,54 @@ pub fn make_test_composition() -> Composition {
 }
 
 fn make_test_baseline() -> Composition {
+    use crate::{
+        make_base_music::make_bassline_ascending,
+        measure::ChordProgression,
+        note::{Chord, ChordType::*, NoteLetter::*},
+    };
 
+    let key = Key::new(C, SharpFlat::Natural, MajorMinor::Minor);
+
+    // i iv V i in C minor, low octave for a bassline
+    let prog = ChordProgression {
+        subsets: vec![vec![
+            Chord::new(C, Major, None, 3),
+            Chord::new(F, Major, None, 3),
+            Chord::new(C, Major, None, 3),
+            Chord::new(C, Major, None, 3),
+            Chord::new(F, Major, None, 3),
+            Chord::new(F, Major, None, 3),
+            Chord::new(C, Major, None, 3),
+            Chord::new(C, Major, None, 3),
+            Chord::new(G, Major, None, 3),
+            Chord::new(F, Major, None, 3),
+            Chord::new(C, Major, None, 3),
+            Chord::new(F, Major, None, 3),
+        ]],
+        sets: vec![(0, 2)],
+    };
+
+    let sig = TimeSignature::new(4, 4);
+
+    // let notes = make_bassline_ascending(&prog);
+    let notes = make_bassline_roots(&prog, sig);
+
+    let mut comp = Composition::new(
+        1,
+        500,
+        key,
+        Temperament::WellTempered(key),
+        vec![Instrument::BassGuitar],
+    );
+
+    for note in &notes {
+        println!("-{note}");
+    }
+
+    comp.notes_by_tick = notes;
+    comp.chord_progression = Some(prog);
+
+    comp
 }
 
 fn main() {

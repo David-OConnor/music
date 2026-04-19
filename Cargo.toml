@@ -10,3 +10,4 @@ rodio = "0.19"
 #burn-cpu = "0.20.1"
 
 rand = "0.10.1"
+musicxml = "1.1.2"  # todo: If this is more difficult than XML directly, ditch it.

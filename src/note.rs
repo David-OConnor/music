@@ -1,10 +1,16 @@
 //! Notes, chords etc. This is a relatively primitive set of types used in both
 //! playback, and generation.
 
-use std::io;
+use std::{
+    fmt,
+    fmt::{Display, Formatter},
+    io,
+};
 
-use crate::overtones::Temperament;
-use crate::key_scale::{Key, SharpFlat};
+use crate::{
+    key_scale::{Key, SharpFlat},
+    overtones::Temperament,
+};
 
 /// For representing notes in sheet music, for example. Internally, we use integers to
 /// represent durations.
@@ -24,6 +30,27 @@ pub enum NoteDurationClass {
     SixtyFourth,
     OneTwentyEighth,
     Other(u8),
+}
+
+impl Display for NoteDurationClass {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Whole => write!(f, "whole"),
+            Self::Half => write!(f, "half"),
+            Self::HalfDotted => write!(f, "half."),
+            Self::Quarter => write!(f, "quarter"),
+            Self::QuarterDotted => write!(f, "quarter."),
+            Self::Eighth => write!(f, "eighth"),
+            Self::EithDotted => write!(f, "eighth."),
+            Self::Sixteenth => write!(f, "16th"),
+            Self::SixteenthDotted => write!(f, "16th."),
+            Self::ThirtySecond => write!(f, "32nd"),
+            Self::ThirtySecondDotted => write!(f, "32nd."),
+            Self::SixtyFourth => write!(f, "64th"),
+            Self::OneTwentyEighth => write!(f, "128th"),
+            Self::Other(v) => write!(f, "1/{v}"),
+        }
+    }
 }
 
 impl NoteDurationClass {
@@ -57,6 +84,23 @@ pub enum NoteLetter {
     E,
     F,
     G,
+}
+
+impl Display for NoteLetter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use NoteLetter::*;
+        let v = match self {
+            A => "A",
+            B => "B",
+            C => "C",
+            D => "D",
+            E => "E",
+            F => "F",
+            G => "G",
+        };
+
+        write!(f, "{v}")
+    }
 }
 
 impl NoteLetter {
@@ -99,9 +143,24 @@ pub struct Note {
     pub octave: u8,
 }
 
+impl Display for Note {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let sf = match self.sharp_flat {
+            Some(SharpFlat::Sharp) => "#",
+            Some(SharpFlat::Flat) => "♭",
+            Some(SharpFlat::Natural) | None => "",
+        };
+        write!(f, "{}{}{}", self.letter, sf, self.octave)
+    }
+}
+
 impl Note {
     pub fn new(letter: NoteLetter, sharp_flat: Option<SharpFlat>, octave: u8) -> Self {
-        Self {letter, sharp_flat, octave}
+        Self {
+            letter,
+            sharp_flat,
+            octave,
+        }
     }
 }
 
@@ -111,6 +170,16 @@ pub struct NotePlayed {
     pub note: Note,
     pub duration: NoteDuration,
     pub amplitude: f32,
+}
+
+impl Display for NotePlayed {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{} - {} - {:.2}",
+            self.note, self.duration, self.amplitude
+        )
+    }
 }
 
 impl NotePlayed {
@@ -210,8 +279,10 @@ impl NotePlayed {
 #[cfg(test)]
 mod tests {
     use super::{Note, NoteDuration, NoteDurationClass, NoteLetter, NotePlayed};
-    use crate::overtones::Temperament;
-    use crate::key_scale::{Key, MajorMinor, SharpFlat};
+    use crate::{
+        key_scale::{Key, MajorMinor, SharpFlat},
+        overtones::Temperament,
+    };
 
     fn note(letter: NoteLetter, sharp_flat: Option<SharpFlat>, octave: u8) -> NotePlayed {
         NotePlayed {
@@ -345,10 +416,27 @@ pub struct Chord {
 }
 
 impl Chord {
+    pub fn new(
+        root: NoteLetter,
+        chord_type: ChordType,
+        augmentation: Option<ChordAugmentation>,
+        octave: u8,
+    ) -> Self {
+        Self {
+            root,
+            chord_type,
+            augmentation,
+            octave,
+        }
+    }
+}
+
+impl Chord {
     pub fn notes(&self) -> Vec<Note> {
         use ChordAugmentation::*;
         use ChordType::*;
         use NoteLetter::*;
+
         use crate::key_scale::SharpFlat::*;
 
         // Intervals in semitones from root: [root, third, fifth]
@@ -444,11 +532,22 @@ mod chord_tests {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum NoteDuration {
     /// Relative to a specific tick size, e.g. as set at a composition level,
     Ticks(u32),
     Traditional(NoteDurationClass),
+}
+
+impl Display for NoteDuration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let v = match self {
+            Self::Ticks(v) => format!("{v} ticks"),
+            Self::Traditional(class) => class.to_string(),
+        };
+
+        write!(f, "{v}")
+    }
 }
 
 impl NoteDuration {

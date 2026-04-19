@@ -2,16 +2,16 @@
 //! This does not include more primitive baseline types, but deals with
 //! combining them. This is a fuzzy notion, but helps organize the code.
 
-use std::io;
+use std::{fmt, io};
 
 use crate::{
     instrument::Instrument,
+    key_scale::Key,
     measure::{ChordProgression, Measure, MicroMeasure},
     note::NotePlayed,
     overtones::Temperament,
     player,
 };
-use crate::key_scale::Key;
 // /// Used for anchoring note durations to discrete time ticks.
 // /// If note_class = NoteDuration::Eigth, and tick_time is 200ms, and eigth note is
 // /// 200ms, and there can be no sixteenth notes.
@@ -38,6 +38,13 @@ pub struct NotesStartingThisTick {
 impl NotesStartingThisTick {
     pub fn empty() -> Self {
         Self { notes: Vec::new() }
+    }
+}
+
+impl fmt::Display for NotesStartingThisTick {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let parts: Vec<String> = self.notes.iter().map(|n| n.to_string()).collect();
+        write!(f, "[{}]", parts.join(", "))
     }
 }
 

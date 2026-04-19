@@ -18,7 +18,7 @@ impl Scale {
         let key_notes = self.key.get_notes();
         let abs = self.mode as usize + i;
         let (letter, sf) = key_notes[abs % 7];
-        
+
         Note::new(letter, Some(sf), self.octave + (abs / 7) as u8)
     }
 }
@@ -81,8 +81,9 @@ impl Key {
     }
 
     const fn signature_count(&self) -> i8 {
-        use crate::note::NoteLetter::*;
         use MajorMinor::*;
+
+        use crate::note::NoteLetter::*;
 
         let natural_count = match self.major_minor {
             Major => match self.base_note {
@@ -179,11 +180,11 @@ impl Key {
 
     pub fn get_notes(&self) -> Vec<(NoteLetter, SharpFlat)> {
         use NoteLetter::*;
-        
+
         let sharps = self.get_sharps_flats();
         let mut notes = Vec::with_capacity(7);
         let mut letter = self.base_note;
-        
+
         for _ in 0..7 {
             let sf = match letter {
                 A => sharps.a,
