@@ -1,3 +1,4 @@
+use std::path::Path;
 use key_scale::{Key, MajorMinor, SharpFlat};
 
 use crate::{
@@ -8,6 +9,7 @@ use crate::{
     note::{Note, NoteLetter},
     overtones::Temperament,
 };
+use crate::sheet_music::MusicXmlFormat;
 
 mod composition;
 mod decomposition;
@@ -250,6 +252,10 @@ fn make_test_baseline() -> Composition {
 fn main() {
     // let comp = make_test_composition();
     let comp = make_test_baseline();
+
+    let test_path = Path::new("./sheet_music.musicxml");
+
+    sheet_music::write_sheet_music(&comp, MusicXmlFormat::Raw,  &test_path).unwrap();
 
     comp.play().unwrap();
 }
