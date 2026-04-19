@@ -194,7 +194,7 @@ pub fn make_test_composition() -> Composition {
 fn make_test_bassline() -> Composition {
     use crate::{
         key_scale::{MajorMinor, SharpFlat::*},
-        note::{Chord, ChordType::*, NoteLetter::*},
+        note::{Chord, ChordQuality::*, NoteLetter::*},
     };
 
     let root_note = Note::new(C, None, 3);
@@ -205,9 +205,9 @@ fn make_test_bassline() -> Composition {
     let fourth = root_note.add_interval(5);
     let fifth = root_note.add_interval(7);
 
-    let chord_c = Chord::new(root_note, Major, None);
-    let chord_f = Chord::new(fourth, Major, None);
-    let chord_g = Chord::new(fifth, Major, None);
+    let chord_c = Chord::new(root_note, Major, None, vec![]);
+    let chord_f = Chord::new(fourth, Major, None, vec![]);
+    let chord_g = Chord::new(fifth, Major, None, vec![]);
 
     let measures = vec![
         Measure::new(key, sig, Some(chord_c.clone()), 100),

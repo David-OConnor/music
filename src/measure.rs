@@ -4,7 +4,7 @@
 
 use crate::{
     key_scale::Key,
-    note::{Chord, ChordPlayed},
+    note::{Chord},
 };
 
 /// A traditional music measure.

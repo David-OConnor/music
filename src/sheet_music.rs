@@ -17,8 +17,7 @@ use crate::{
     key_scale::{Key, MajorMinor, SharpFlat},
     measure::{Measure, TimeSignature},
     note::{
-        Chord, ChordAugmentation, ChordType, Note, NoteDuration, NoteDurationClass, NoteLetter,
-        NotePlayed,
+        Chord, ChordQuality, Note, NoteDuration, NoteDurationClass, NoteLetter, NotePlayed,
     },
     overtones::Temperament,
 };
@@ -246,34 +245,82 @@ fn sharp_flat_to_root_alter(sf: Option<SharpFlat>) -> Option<mx::RootAlter> {
 }
 
 fn chord_to_kind_value(chord: &Chord) -> mxd::KindValue {
-    match (chord.chord_type, chord.augmentation) {
-        (ChordType::Major, None) => mxd::KindValue::Major,
-        (ChordType::Minor, None) => mxd::KindValue::Minor,
-        (ChordType::Major, Some(ChordAugmentation::Augmented)) => mxd::KindValue::Augmented,
-        (ChordType::Minor, Some(ChordAugmentation::Diminished)) => mxd::KindValue::Diminished,
-        (ChordType::Major, Some(ChordAugmentation::Diminished)) => mxd::KindValue::Diminished,
-        (ChordType::Minor, Some(ChordAugmentation::Augmented)) => mxd::KindValue::Augmented,
+    match (chord.quality, chord.extension) {
+        (ChordQuality::Major, None) => mxd::KindValue::Major,
+        (ChordQuality::Major, Some(7)) => mxd::KindValue::MajorSeventh,
+        (ChordQuality::Major, Some(9)) => mxd::KindValue::MajorNinth,
+        (ChordQuality::Major, Some(11)) => mxd::KindValue::Major11th,
+        (ChordQuality::Major, Some(13)) => mxd::KindValue::Major13th,
+        (ChordQuality::Minor, None) => mxd::KindValue::Minor,
+        (ChordQuality::Minor, Some(7)) => mxd::KindValue::MinorSeventh,
+        (ChordQuality::Minor, Some(9)) => mxd::KindValue::MinorNinth,
+        (ChordQuality::Minor, Some(11)) => mxd::KindValue::Minor11th,
+        (ChordQuality::Minor, Some(13)) => mxd::KindValue::Minor13th,
+        (ChordQuality::Augmented, None) => mxd::KindValue::Augmented,
+        (ChordQuality::Augmented, Some(7)) => mxd::KindValue::AugmentedSeventh,
+        (ChordQuality::Diminished, None) => mxd::KindValue::Diminished,
+        (ChordQuality::Diminished, Some(7)) => mxd::KindValue::DiminishedSeventh,
+        _ => mxd::KindValue::Major,
     }
 }
 
-fn kind_value_to_chord_type(kv: &mxd::KindValue) -> (ChordType, Option<ChordAugmentation>) {
+fn kind_value_to_quality_extension(kv: &mxd::KindValue) -> (ChordQuality, Option<u8>) {
     use mxd::KindValue::{
-        Augmented, AugmentedSeventh, Diminished, DiminishedSeventh, HalfDiminished, MajorMinor,
-        Minor, Minor11th, Minor13th, MinorNinth, MinorSeventh, MinorSixth,
+        Augmented, AugmentedSeventh, Diminished, DiminishedSeventh, Dominant, Dominant11th,
+        Dominant13th, DominantNinth, HalfDiminished, Major, Major11th, Major13th, MajorMinor,
+        MajorNinth, MajorSeventh, Minor, Minor11th, Minor13th, MinorNinth, MinorSeventh,
+        MinorSixth, Power,
     };
     match kv {
-        Minor | MinorSeventh | MinorNinth | Minor11th | Minor13th | MinorSixth | MajorMinor => {
-            (ChordType::Minor, Option::None)
-        }
-        Augmented | AugmentedSeventh => (ChordType::Major, Some(ChordAugmentation::Augmented)),
-        Diminished | DiminishedSeventh | HalfDiminished => {
-            (ChordType::Minor, Some(ChordAugmentation::Diminished))
-        }
-        _ => (ChordType::Major, Option::None),
+        Major | Power => (ChordQuality::Major, Option::None),
+        MajorSeventh => (ChordQuality::Major, Some(7)),
+        MajorNinth => (ChordQuality::Major, Some(9)),
+        Major11th => (ChordQuality::Major, Some(11)),
+        Major13th => (ChordQuality::Major, Some(13)),
+        Minor | MinorSixth => (ChordQuality::Minor, Option::None),
+        MinorSeventh | MajorMinor => (ChordQuality::Minor, Some(7)),
+        MinorNinth => (ChordQuality::Minor, Some(9)),
+        Minor11th => (ChordQuality::Minor, Some(11)),
+        Minor13th => (ChordQuality::Minor, Some(13)),
+        Dominant => (ChordQuality::Major, Some(7)),
+        DominantNinth => (ChordQuality::Major, Some(9)),
+        Dominant11th => (ChordQuality::Major, Some(11)),
+        Dominant13th => (ChordQuality::Major, Some(13)),
+        Augmented => (ChordQuality::Augmented, Option::None),
+        AugmentedSeventh => (ChordQuality::Augmented, Some(7)),
+        Diminished => (ChordQuality::Diminished, Option::None),
+        DiminishedSeventh | HalfDiminished => (ChordQuality::Diminished, Some(7)),
+        _ => (ChordQuality::Major, Option::None),
     }
 }
 
 fn chord_to_harmony(chord: &Chord) -> mx::Harmony {
+    let degrees: Vec<mx::Degree> = chord
+        .alterations
+        .iter()
+        .map(|(sf, deg)| mx::Degree {
+            attributes: mx::DegreeAttributes::default(),
+            content: mx::DegreeContents {
+                degree_value: mx::DegreeValue {
+                    attributes: mx::DegreeValueAttributes::default(),
+                    content: mxd::PositiveInteger(*deg as u32),
+                },
+                degree_alter: mx::DegreeAlter {
+                    attributes: mx::DegreeAlterAttributes::default(),
+                    content: mxd::Semitones(match sf {
+                        SharpFlat::Sharp => 1,
+                        SharpFlat::Flat => -1,
+                        SharpFlat::Natural => 0,
+                    }),
+                },
+                degree_type: mx::DegreeType {
+                    attributes: mx::DegreeTypeAttributes::default(),
+                    content: mxd::DegreeTypeValue::Alter,
+                },
+            },
+        })
+        .collect();
+
     mx::Harmony {
         attributes: mx::HarmonyAttributes::default(),
         content: mx::HarmonyContents {
@@ -296,7 +343,7 @@ fn chord_to_harmony(chord: &Chord) -> mx::Harmony {
                 },
                 inversion: None,
                 bass: None,
-                degree: vec![],
+                degree: degrees,
             }],
             frame: None,
             offset: None,
@@ -321,12 +368,24 @@ fn harmony_to_chord(h: &mx::Harmony) -> Option<Chord> {
             SharpFlat::Natural
         }
     });
-    let (chord_type, augmentation) = kind_value_to_chord_type(&sub.kind.content);
-    Some(Chord::new(
-        Note::new(letter, sf, 4),
-        chord_type,
-        augmentation,
-    ))
+    let (quality, extension) = kind_value_to_quality_extension(&sub.kind.content);
+    let alterations: Vec<(SharpFlat, u8)> = sub
+        .degree
+        .iter()
+        .filter_map(|d| {
+            let deg = *d.content.degree_value.content as u8;
+            let alter = *d.content.degree_alter.content;
+            let sf = if alter > 0 {
+                SharpFlat::Sharp
+            } else if alter < 0 {
+                SharpFlat::Flat
+            } else {
+                SharpFlat::Natural
+            };
+            Some((sf, deg))
+        })
+        .collect();
+    Some(Chord::new(Note::new(letter, sf, 4), quality, extension, alterations))
 }
 
 // --- Tick / division arithmetic ---
