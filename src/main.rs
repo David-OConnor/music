@@ -5,7 +5,7 @@ use key_scale::{Key, MajorMinor, SharpFlat};
 use crate::{
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
-    make_bass_music::make_bassline_ascending,
+    make_bass_music::{make_bassline_ascending, make_bassline_random},
     measure::{Measure, TimeSignature},
     note::{Note, NoteLetter},
     overtones::Temperament,
@@ -197,12 +197,9 @@ fn make_test_bassline() -> Composition {
         note::{Chord, ChordType::*, NoteLetter::*},
     };
 
-    // let root = C;
+    let root_note = Note::new(C, None, 3);
 
-    let root_note = Note::new(C, Some(Sharp), 3);
-    // let maj_minor = MajorMinor::Minor;
-
-    let key = Key::new(root_note.letter, Sharp, MajorMinor::Minor);
+    let key = Key::new(root_note.letter, Natural, MajorMinor::Major);
     let sig = TimeSignature::new(4, 4);
 
     let fourth = root_note.add_interval(5);
@@ -229,7 +226,8 @@ fn make_test_bassline() -> Composition {
 
     // let notes = make_bassline_ascending(&measures, 1);
     // let notes = make_bassline_roots(&measures, 1);
-    let notes = make_bassline_ascending(&measures, 1);
+    // let notes = make_bassline_ascending(&measures, 1);
+    let notes = make_bassline_random(&measures, 1, true);
 
     let mut comp = Composition::new(
         1,

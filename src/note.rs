@@ -462,6 +462,25 @@ pub struct Chord {
     // pub octave: u8,
 }
 
+impl Display for Chord {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let sf = match self.root.sharp_flat {
+            Some(SharpFlat::Sharp) => "#",
+            Some(SharpFlat::Flat) => "b",
+            Some(SharpFlat::Natural) | None => "",
+        };
+        let suffix = match (self.chord_type, self.augmentation) {
+            (ChordType::Major, None) => "",
+            (ChordType::Minor, None) => "m",
+            (ChordType::Major, Some(ChordAugmentation::Augmented)) => "aug",
+            (ChordType::Minor, Some(ChordAugmentation::Diminished)) => "dim",
+            (ChordType::Major, Some(ChordAugmentation::Diminished)) => "maj\u{266d}5",
+            (ChordType::Minor, Some(ChordAugmentation::Augmented)) => "m+",
+        };
+        write!(f, "{}{}{}", self.root.letter, sf, suffix)
+    }
+}
+
 impl Chord {
     pub fn new(
         root: Note,

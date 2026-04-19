@@ -15,8 +15,11 @@ use crate::{
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
     key_scale::{Key, MajorMinor, SharpFlat},
-    measure::TimeSignature,
-    note::{Note, NoteDuration, NoteDurationClass, NoteLetter, NotePlayed},
+    measure::{Measure, TimeSignature},
+    note::{
+        Chord, ChordAugmentation, ChordType, Note, NoteDuration, NoteDurationClass, NoteLetter,
+        NotePlayed,
+    },
     overtones::Temperament,
 };
 
@@ -224,6 +227,106 @@ fn instrument_name(instr: Instrument) -> String {
         Instrument::Banjo => "Banjo",
     }
     .to_string()
+}
+
+// --- Harmony / chord symbol conversions ---
+
+fn sharp_flat_to_root_alter(sf: Option<SharpFlat>) -> Option<mx::RootAlter> {
+    match sf {
+        Some(SharpFlat::Sharp) => Some(mx::RootAlter {
+            attributes: mx::RootAlterAttributes::default(),
+            content: mxd::Semitones(1),
+        }),
+        Some(SharpFlat::Flat) => Some(mx::RootAlter {
+            attributes: mx::RootAlterAttributes::default(),
+            content: mxd::Semitones(-1),
+        }),
+        Some(SharpFlat::Natural) | None => None,
+    }
+}
+
+fn chord_to_kind_value(chord: &Chord) -> mxd::KindValue {
+    match (chord.chord_type, chord.augmentation) {
+        (ChordType::Major, None) => mxd::KindValue::Major,
+        (ChordType::Minor, None) => mxd::KindValue::Minor,
+        (ChordType::Major, Some(ChordAugmentation::Augmented)) => mxd::KindValue::Augmented,
+        (ChordType::Minor, Some(ChordAugmentation::Diminished)) => mxd::KindValue::Diminished,
+        (ChordType::Major, Some(ChordAugmentation::Diminished)) => mxd::KindValue::Diminished,
+        (ChordType::Minor, Some(ChordAugmentation::Augmented)) => mxd::KindValue::Augmented,
+    }
+}
+
+fn kind_value_to_chord_type(kv: &mxd::KindValue) -> (ChordType, Option<ChordAugmentation>) {
+    use mxd::KindValue::{
+        Augmented, AugmentedSeventh, Diminished, DiminishedSeventh, HalfDiminished, MajorMinor,
+        Minor, Minor11th, Minor13th, MinorNinth, MinorSeventh, MinorSixth,
+    };
+    match kv {
+        Minor | MinorSeventh | MinorNinth | Minor11th | Minor13th | MinorSixth | MajorMinor => {
+            (ChordType::Minor, Option::None)
+        }
+        Augmented | AugmentedSeventh => (ChordType::Major, Some(ChordAugmentation::Augmented)),
+        Diminished | DiminishedSeventh | HalfDiminished => {
+            (ChordType::Minor, Some(ChordAugmentation::Diminished))
+        }
+        _ => (ChordType::Major, Option::None),
+    }
+}
+
+fn chord_to_harmony(chord: &Chord) -> mx::Harmony {
+    mx::Harmony {
+        attributes: mx::HarmonyAttributes::default(),
+        content: mx::HarmonyContents {
+            harmony: vec![mx::HarmonySubcontents {
+                root: Some(mx::Root {
+                    attributes: (),
+                    content: mx::RootContents {
+                        root_step: mx::RootStep {
+                            attributes: mx::RootStepAttributes::default(),
+                            content: note_letter_to_step(chord.root.letter),
+                        },
+                        root_alter: sharp_flat_to_root_alter(chord.root.sharp_flat),
+                    },
+                }),
+                numeral: None,
+                function: None,
+                kind: mx::Kind {
+                    attributes: mx::KindAttributes::default(),
+                    content: chord_to_kind_value(chord),
+                },
+                inversion: None,
+                bass: None,
+                degree: vec![],
+            }],
+            frame: None,
+            offset: None,
+            footnote: None,
+            level: None,
+            staff: None,
+        },
+    }
+}
+
+fn harmony_to_chord(h: &mx::Harmony) -> Option<Chord> {
+    let sub = h.content.harmony.first()?;
+    let root_el = sub.root.as_ref()?;
+    let letter = step_to_note_letter(&root_el.content.root_step.content);
+    let sf = root_el.content.root_alter.as_ref().map(|ra| {
+        let val = *ra.content;
+        if val > 0 {
+            SharpFlat::Sharp
+        } else if val < 0 {
+            SharpFlat::Flat
+        } else {
+            SharpFlat::Natural
+        }
+    });
+    let (chord_type, augmentation) = kind_value_to_chord_type(&sub.kind.content);
+    Some(Chord::new(
+        Note::new(letter, sf, 4),
+        chord_type,
+        augmentation,
+    ))
 }
 
 // --- Tick / division arithmetic ---
@@ -634,6 +737,9 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
                 let attrs = make_measure_attrs(comp.key, &measure.time_signature, instr, dpq);
                 measure_content.push(mx::MeasureElement::Attributes(attrs));
             }
+            if let Some(ref chord) = measure.chord {
+                measure_content.push(mx::MeasureElement::Harmony(chord_to_harmony(chord)));
+            }
             measure_content.extend(build_measure_notes(
                 tick_start,
                 tick_count,
@@ -730,94 +836,131 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
         vec![],
     );
 
-    // Extract notes from all parts, accumulating ticks globally
-    for part in &score.content.part {
+    // Extract notes and measures from all parts
+    for (part_idx, part) in score.content.part.iter().enumerate() {
         let mut current_tick: usize = 0;
+        let mut current_key = key;
+        let mut current_ts = ts;
 
         for elem in &part.content {
             if let mx::PartElement::Measure(measure) = elem {
+                let mut measure_chord: Option<Chord> = None;
+
                 for mel in &measure.content {
-                    if let mx::MeasureElement::Note(note) = mel {
-                        if let mx::NoteType::Normal(info) = &note.content.info {
-                            let dur_divs = *info.duration.content as usize;
-                            let is_chord = info.chord.is_some();
-
-                            match &info.audible {
-                                mx::AudibleType::Pitch(pitch) => {
-                                    let letter = step_to_note_letter(&pitch.content.step.content);
-                                    let octave = *pitch.content.octave.content;
-                                    let sf = alter_to_sharp_flat(pitch.content.alter.as_ref());
-
-                                    // Prefer the notated type element; fall back to raw tick count
-                                    let duration = if let Some(type_el) = &note.content.r#type {
-                                        let class = type_value_to_duration_class(&type_el.content);
-                                        let has_dot = !note.content.dot.is_empty();
-                                        if has_dot {
-                                            match class {
-                                                NoteDurationClass::Half => {
-                                                    NoteDuration::Traditional(
-                                                        NoteDurationClass::HalfDotted,
-                                                    )
-                                                }
-                                                NoteDurationClass::Quarter => {
-                                                    NoteDuration::Traditional(
-                                                        NoteDurationClass::QuarterDotted,
-                                                    )
-                                                }
-                                                NoteDurationClass::Eighth => {
-                                                    NoteDuration::Traditional(
-                                                        NoteDurationClass::EithDotted,
-                                                    )
-                                                }
-                                                NoteDurationClass::Sixteenth => {
-                                                    NoteDuration::Traditional(
-                                                        NoteDurationClass::SixteenthDotted,
-                                                    )
-                                                }
-                                                NoteDurationClass::ThirtySecond => {
-                                                    NoteDuration::Traditional(
-                                                        NoteDurationClass::ThirtySecondDotted,
-                                                    )
-                                                }
-                                                _ => NoteDuration::Ticks(dur_divs as u32),
-                                            }
-                                        } else {
-                                            NoteDuration::Traditional(class)
+                    match mel {
+                        mx::MeasureElement::Attributes(attrs) => {
+                            if let Some(key_el) = attrs.content.key.first() {
+                                if let mx::KeyContents::Explicit(exp) = &key_el.content {
+                                    let fifths = *exp.fifths.content;
+                                    let mode = match &exp.mode {
+                                        Some(m) if m.content == mxd::Mode::Minor => {
+                                            MajorMinor::Minor
                                         }
-                                    } else {
-                                        NoteDuration::Ticks(dur_divs as u32)
+                                        _ => MajorMinor::Major,
                                     };
-
-                                    let tick = current_tick;
-                                    while comp.notes_by_tick.len() <= tick {
-                                        comp.notes_by_tick.push(NotesStartingThisTick::empty());
-                                    }
-                                    comp.notes_by_tick[tick].notes.push(NotePlayed {
-                                        note: Note::new(letter, sf, octave),
-                                        duration,
-                                        amplitude: 0.8,
-                                    });
-
-                                    if !is_chord {
-                                        current_tick += dur_divs;
+                                    current_key = fifths_mode_to_key(fifths, mode);
+                                }
+                            }
+                            if let Some(time_el) = attrs.content.time.first() {
+                                if let Some(tb) = time_el.content.beats.first() {
+                                    if let (Ok(num), Ok(den)) = (
+                                        tb.beats.content.parse::<u8>(),
+                                        tb.beat_type.content.parse::<u8>(),
+                                    ) {
+                                        current_ts = TimeSignature::new(num, den);
                                     }
                                 }
-                                mx::AudibleType::Rest(_) => {
-                                    if !is_chord {
-                                        current_tick += dur_divs;
-                                    }
-                                }
-                                mx::AudibleType::Unpitched(_) => {}
                             }
                         }
+                        mx::MeasureElement::Harmony(h) => {
+                            measure_chord = harmony_to_chord(h);
+                        }
+                        mx::MeasureElement::Note(note) => {
+                            if let mx::NoteType::Normal(info) = &note.content.info {
+                                let dur_divs = *info.duration.content as usize;
+                                let is_chord = info.chord.is_some();
+
+                                match &info.audible {
+                                    mx::AudibleType::Pitch(pitch) => {
+                                        let letter =
+                                            step_to_note_letter(&pitch.content.step.content);
+                                        let octave = *pitch.content.octave.content;
+                                        let sf = alter_to_sharp_flat(pitch.content.alter.as_ref());
+
+                                        let duration = if let Some(type_el) = &note.content.r#type {
+                                            let class =
+                                                type_value_to_duration_class(&type_el.content);
+                                            let has_dot = !note.content.dot.is_empty();
+                                            if has_dot {
+                                                match class {
+                                                    NoteDurationClass::Half => {
+                                                        NoteDuration::Traditional(
+                                                            NoteDurationClass::HalfDotted,
+                                                        )
+                                                    }
+                                                    NoteDurationClass::Quarter => {
+                                                        NoteDuration::Traditional(
+                                                            NoteDurationClass::QuarterDotted,
+                                                        )
+                                                    }
+                                                    NoteDurationClass::Eighth => {
+                                                        NoteDuration::Traditional(
+                                                            NoteDurationClass::EithDotted,
+                                                        )
+                                                    }
+                                                    NoteDurationClass::Sixteenth => {
+                                                        NoteDuration::Traditional(
+                                                            NoteDurationClass::SixteenthDotted,
+                                                        )
+                                                    }
+                                                    NoteDurationClass::ThirtySecond => {
+                                                        NoteDuration::Traditional(
+                                                            NoteDurationClass::ThirtySecondDotted,
+                                                        )
+                                                    }
+                                                    _ => NoteDuration::Ticks(dur_divs as u32),
+                                                }
+                                            } else {
+                                                NoteDuration::Traditional(class)
+                                            }
+                                        } else {
+                                            NoteDuration::Ticks(dur_divs as u32)
+                                        };
+
+                                        let tick = current_tick;
+                                        while comp.notes_by_tick.len() <= tick {
+                                            comp.notes_by_tick.push(NotesStartingThisTick::empty());
+                                        }
+                                        comp.notes_by_tick[tick].notes.push(NotePlayed {
+                                            note: Note::new(letter, sf, octave),
+                                            duration,
+                                            amplitude: 0.8,
+                                        });
+
+                                        if !is_chord {
+                                            current_tick += dur_divs;
+                                        }
+                                    }
+                                    mx::AudibleType::Rest(_) => {
+                                        if !is_chord {
+                                            current_tick += dur_divs;
+                                        }
+                                    }
+                                    mx::AudibleType::Unpitched(_) => {}
+                                }
+                            }
+                        }
+                        _ => {}
                     }
+                }
+
+                if part_idx == 0 {
+                    comp.measures
+                        .push(Measure::new(current_key, current_ts, measure_chord, 120));
                 }
             }
         }
     }
-
-    // todo: Reconstruct comp.measures from the extracted time signature data.
-    let _ = ts;
 
     comp
 }
