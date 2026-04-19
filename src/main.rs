@@ -1,12 +1,11 @@
 use std::path::Path;
 
 use key_scale::{Key, MajorMinor, SharpFlat};
-use musicxml::datatypes::KindValue::MajorMinor;
 
 use crate::{
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
-    make_bass_music::{make_bassline_ascending, make_bassline_roots},
+    make_bass_music::make_bassline_ascending,
     measure::{Measure, TimeSignature},
     note::{Note, NoteLetter},
     overtones::Temperament,
@@ -206,8 +205,8 @@ fn make_test_bassline() -> Composition {
     let key = Key::new(root_note.letter, Sharp, MajorMinor::Minor);
     let sig = TimeSignature::new(4, 4);
 
-    let fourth = root_note.add_interval(4);
-    let fifth = root_note.add_interval(6);
+    let fourth = root_note.add_interval(5);
+    let fifth = root_note.add_interval(7);
 
     let chord_c = Chord::new(root_note, Major, None);
     let chord_f = Chord::new(fourth, Major, None);
@@ -221,9 +220,9 @@ fn make_test_bassline() -> Composition {
         Measure::new(key, sig, Some(chord_f.clone()), 100),
         Measure::new(key, sig, Some(chord_f.clone()), 100),
         Measure::new(key, sig, Some(chord_c.clone()), 100),
+        Measure::new(key, sig, Some(chord_c.clone()), 100),
         Measure::new(key, sig, Some(chord_g.clone()), 100),
         Measure::new(key, sig, Some(chord_f.clone()), 100),
-        Measure::new(key, sig, Some(chord_c.clone()), 100),
         Measure::new(key, sig, Some(chord_c.clone()), 100),
         Measure::new(key, sig, Some(chord_f.clone()), 100),
     ];

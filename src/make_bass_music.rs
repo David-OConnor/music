@@ -4,7 +4,6 @@ use rand::RngExt;
 
 use crate::{
     composition::NotesStartingThisTick,
-    key_scale::SharpFlat,
     measure::Measure,
     note::{Note, NoteDuration, NoteDurationClass, NotePlayed},
 };
@@ -51,7 +50,7 @@ pub fn make_bassline_roots(
         let duration = NoteDuration::Traditional(beat_duration(ts.denominator));
         let ticks_per_beat = beat_ticks(ts.denominator, ticks_per_sixteenth);
         let octave = octaves[rng.random_range(0..octaves.len())];
-        let note = Note::new(chord.root, Some(SharpFlat::Natural), octave);
+        let note = Note::new(chord.root.letter, chord.root.sharp_flat, octave);
 
         for _ in 0..ts.numerator {
             res.push(NotesStartingThisTick {

@@ -164,9 +164,49 @@ impl Note {
         }
     }
 
-    /// E.g C# + 2 = D#. G-flat + 3 = A.
+    /// E.g C# + 2 = D#. G-flat + 3 = A. Interval is in semitones.
     pub fn add_interval(&self, interval: u8) -> Self {
-        // todo: Fill this out.
+        use NoteLetter::*;
+
+        use crate::key_scale::SharpFlat::*;
+
+        let base: i32 = match self.letter {
+            C => 0,
+            D => 2,
+            E => 4,
+            F => 5,
+            G => 7,
+            A => 9,
+            B => 11,
+        };
+        let sf: i32 = match self.sharp_flat {
+            Some(Sharp) => 1,
+            Some(Flat) => -1,
+            Some(Natural) | None => 0,
+        };
+        let total = base + sf + interval as i32;
+        let semitone = total.rem_euclid(12);
+        let octave_shift = total.div_euclid(12);
+        let (letter, sharp_flat) = match semitone {
+            0 => (C, Natural),
+            1 => (C, Sharp),
+            2 => (D, Natural),
+            3 => (D, Sharp),
+            4 => (E, Natural),
+            5 => (F, Natural),
+            6 => (F, Sharp),
+            7 => (G, Natural),
+            8 => (G, Sharp),
+            9 => (A, Natural),
+            10 => (A, Sharp),
+            11 => (B, Natural),
+            _ => unreachable!(),
+        };
+        Note::new(
+            letter,
+            Some(sharp_flat),
+            (self.octave as i32 + octave_shift) as u8,
+        )
     }
 }
 
@@ -456,7 +496,12 @@ impl Chord {
             (Minor, Some(Augmented)) => [0, 3, 8],
         };
 
-        let base_semitone = match self.root.letter {
+        let sf_offset: i32 = match self.root.sharp_flat {
+            Some(Sharp) => 1,
+            Some(Flat) => -1,
+            Some(Natural) | None => 0,
+        };
+        let base_semitone: i32 = match self.root.letter {
             C => 0,
             D => 2,
             E => 4,
@@ -464,7 +509,7 @@ impl Chord {
             G => 7,
             A => 9,
             B => 11,
-        };
+        } + sf_offset;
 
         intervals
             .iter()
@@ -486,7 +531,7 @@ impl Chord {
                     _ => unreachable!(),
                 };
 
-                let octave = (self.octave as i32 + abs.div_euclid(12)) as u8;
+                let octave = (self.root.octave as i32 + abs.div_euclid(12)) as u8;
 
                 Note::new(letter, Some(sharp_flat), octave)
             })
@@ -506,17 +551,16 @@ pub struct ChordPlayed {
 
 #[cfg(test)]
 mod chord_tests {
-    use super::{Chord, ChordPlayed, ChordType, NoteDuration, NoteDurationClass, NoteLetter};
+    use super::{Chord, ChordPlayed, ChordType, Note, NoteDuration, NoteDurationClass, NoteLetter};
     use crate::key_scale::SharpFlat;
 
     #[test]
     fn chord_notes_roll_into_the_next_octave_when_needed() {
         let chord = ChordPlayed {
             chord: Chord {
-                root: NoteLetter::B,
+                root: Note::new(NoteLetter::B, Some(SharpFlat::Natural), 3),
                 chord_type: ChordType::Major,
                 augmentation: None,
-                octave: 3,
             },
             duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
             amplitude: 1.0,
