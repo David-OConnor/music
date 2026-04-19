@@ -7,7 +7,7 @@ use std::{fmt, io};
 use crate::{
     instrument::Instrument,
     key_scale::Key,
-    measure::{ChordProgression, Measure, MicroMeasure},
+    measure::{Measure, MicroMeasure},
     note::NotePlayed,
     overtones::Temperament,
     player,
@@ -63,8 +63,8 @@ pub struct Composition {
     /// This is indexed by tick, starting at 0.
     pub notes_by_tick: Vec<NotesStartingThisTick>,
     pub measures: Vec<Measure>,
-    /// Not required, but may help with generation, improvisation etc.
-    pub chord_progression: Option<ChordProgression>,
+    // /// Not required, but may help with generation, improvisation etc.
+    // pub chord_progression: Option<ChordProgression>,
     /// Default key for notes whose sharp_flat field is None.
     pub key: Key,
     pub temperament: Temperament,
@@ -87,7 +87,7 @@ impl Composition {
             instruments,
             notes_by_tick: Vec::new(),
             measures: Vec::new(),
-            chord_progression: None,
+            // chord_progression: None,
             key,
             temperament,
         }

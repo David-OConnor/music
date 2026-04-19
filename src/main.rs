@@ -9,6 +9,7 @@ use crate::{
     note::{Note, NoteLetter},
     overtones::Temperament,
 };
+use crate::measure::Measure;
 use crate::sheet_music::MusicXmlFormat;
 
 mod composition;
@@ -200,36 +201,33 @@ pub fn make_test_composition() -> Composition {
 
 fn make_test_baseline() -> Composition {
     use crate::{
-        make_base_music::make_bassline_ascending,
-        measure::ChordProgression,
         note::{Chord, ChordType::*, NoteLetter::*},
     };
 
-    let key = Key::new(C, SharpFlat::Natural, MajorMinor::Minor);
-
-    // i iv V i in C minor, low octave for a bassline
-    let prog = ChordProgression {
-        subsets: vec![vec![
-            Chord::new(C, Major, None, 3),
-            Chord::new(F, Major, None, 3),
-            Chord::new(C, Major, None, 3),
-            Chord::new(C, Major, None, 3),
-            Chord::new(F, Major, None, 3),
-            Chord::new(F, Major, None, 3),
-            Chord::new(C, Major, None, 3),
-            Chord::new(C, Major, None, 3),
-            Chord::new(G, Major, None, 3),
-            Chord::new(F, Major, None, 3),
-            Chord::new(C, Major, None, 3),
-            Chord::new(F, Major, None, 3),
-        ]],
-        sets: vec![(0, 2)],
-    };
-
+    let key = Key::new(C, SharpFlat::Natural, MajorMinor::Major);
     let sig = TimeSignature::new(4, 4);
 
+    let chord_c = Chord::new(C, Major, None, 3);
+    let chord_f = Chord::new(F, Major, None, 3);
+    let chord_g = Chord::new(G, Major, None, 3);
+
+    let measures = vec![
+        Measure::new(key, sig, Some(chord_c.clone()), 100),
+        Measure::new(key, sig, Some(chord_f.clone()), 100),
+        Measure::new(key, sig, Some(chord_c.clone()), 100),
+        Measure::new(key, sig, Some(chord_c.clone()), 100),
+        Measure::new(key, sig, Some(chord_f.clone()), 100),
+        Measure::new(key, sig, Some(chord_f.clone()), 100),
+        Measure::new(key, sig, Some(chord_c.clone()), 100),
+        Measure::new(key, sig, Some(chord_g.clone()), 100),
+        Measure::new(key, sig, Some(chord_f.clone()), 100),
+        Measure::new(key, sig, Some(chord_c.clone()), 100),
+        Measure::new(key, sig, Some(chord_c.clone()), 100),
+        Measure::new(key, sig, Some(chord_f.clone()), 100),
+    ];
+
     // let notes = make_bassline_ascending(&prog);
-    let notes = make_bassline_roots(&prog, sig);
+    let notes = make_bassline_roots(&measures);
 
     let mut comp = Composition::new(
         1,
@@ -244,7 +242,7 @@ fn make_test_baseline() -> Composition {
     }
 
     comp.notes_by_tick = notes;
-    comp.chord_progression = Some(prog);
+    // comp.chord_progression = Some(prog);
 
     comp
 }

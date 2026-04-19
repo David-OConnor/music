@@ -408,6 +408,7 @@ pub enum ChordAugmentation {
     Augmented,
 }
 
+#[derive(Clone)]
 pub struct Chord {
     pub root: NoteLetter,
     pub chord_type: ChordType,

@@ -15,6 +15,13 @@ pub struct Measure {
     pub key: Key,
     pub time_signature: TimeSignature,
     pub tempo: u32,
+    pub chord: Option<Chord>
+}
+
+impl Measure {
+    pub fn new(key: Key, time_signature: TimeSignature, chord: Option<Chord>, tempo: u32) -> Self {
+        Self {ident: 0, key, time_signature, chord, tempo}
+    }
 }
 
 impl Measure {
@@ -33,7 +40,7 @@ pub struct MicroMeasure {
     pub duration: u32,
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct TimeSignature {
     pub numerator: u8,
     pub denominator: u8,
@@ -56,11 +63,11 @@ pub enum Clef {
     Alto,
 }
 
-/// A framework of coords, by measure. This may have more applicability to music generation
-/// than as a fundamental representation of a work.
-pub struct ChordProgression {
-    /// Indexed by measure. These sets can be composed into a broader structure.
-    pub subsets: Vec<Vec<Chord>>,
-    /// (subset index, repetitions)
-    pub sets: Vec<(usize, usize)>,
-}
+// /// A framework of coords, by measure. This may have more applicability to music generation
+// /// than as a fundamental representation of a work.
+// pub struct ChordProgression {
+//     /// Indexed by measure. These sets can be composed into a broader structure.
+//     pub subsets: Vec<Vec<Chord>>,
+//     /// (subset index, repetitions)
+//     pub sets: Vec<(usize, usize)>,
+// }
