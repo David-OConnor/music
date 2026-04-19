@@ -6,11 +6,12 @@ use std::io;
 
 use crate::{
     instrument::Instrument,
-    measure::{ChordProgression, Key, Measure, MicroMeasure, SharpFlat},
-    note::{Note, NoteLetter},
+    measure::{ChordProgression, Measure, MicroMeasure},
+    note::NotePlayed,
     overtones::Temperament,
     player,
 };
+use crate::key_scale::Key;
 // /// Used for anchoring note durations to discrete time ticks.
 // /// If note_class = NoteDuration::Eigth, and tick_time is 200ms, and eigth note is
 // /// 200ms, and there can be no sixteenth notes.
@@ -31,7 +32,7 @@ use crate::{
 /// Likely tentative. Represents all notes which start in a single tick. Will have one note for single notes,
 /// multiple notes for coords. This is only the notes which *start* this tick.
 pub struct NotesStartingThisTick {
-    pub notes: Vec<Note>,
+    pub notes: Vec<NotePlayed>,
 }
 
 impl NotesStartingThisTick {
@@ -45,8 +46,6 @@ impl NotesStartingThisTick {
 /// and are expanding it to be more general, so as not to be restricted to traditional
 /// western music conventions.
 pub struct Composition {
-    // pub tick_base: TickBase,
-    // pub tick_base: NoteDurationClass,
     /// We use this to scale the NoteDurationClass (16th notes, 8th notes etc) with
     /// the underlying integer tick system. Set to 1 if there is truly no time interval
     /// finer than a 16th note.
@@ -84,6 +83,26 @@ impl Composition {
             chord_progression: None,
             key,
             temperament,
+        }
+    }
+
+    /// Safely changes ticks-per-sixteenth note, if able.
+    pub fn change_ticks_per_sixteenth_note(&mut self, v: u32) -> io::Result<()> {
+        if v > self.ticks_per_sixteenth_note {
+            if v.is_multiple_of(self.ticks_per_sixteenth_note) {
+                self.ticks_per_sixteenth_note = v;
+
+                // todo: Insert new notes_by_tick in the spacings.
+
+                Ok(())
+            } else {
+                // todo: If not, check self.notes_by_tick that they can be evenly spaced out.
+                // todo: If not, return an error.
+                unimplemented!();
+            }
+        } else {
+            // todo: Make sure we can cleanly remove empty spaces between notes. If not, return an error.
+            unimplemented!();
         }
     }
 

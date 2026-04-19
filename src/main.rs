@@ -1,13 +1,11 @@
-use measure::{Key, SharpFlat};
-use note::NoteDurationClass::{Eighth, Quarter};
-
+use key_scale::{Key, MajorMinor, SharpFlat};
 use crate::{
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
-    measure::MajorMinor,
     note::NoteLetter,
     overtones::Temperament,
 };
+use crate::note::Note;
 
 mod composition;
 mod decomposition;
@@ -17,7 +15,8 @@ mod measure;
 mod note;
 mod overtones;
 mod player;
-
+mod make_base_music;
+mod key_scale;
 //
 
 // pub struct NotePlayed {
@@ -35,7 +34,7 @@ pub struct State {
 /// The opening of *Alicia* from the Expedition 33 sound track.
 pub fn make_test_composition() -> Composition {
     use measure::TimeSignature;
-    use note::{Note, NoteDuration, NoteDurationClass::*, NoteLetter::*};
+    use note::{NotePlayed, NoteDuration, NoteDurationClass::*, NoteLetter::*};
 
     let ei = NoteDuration::Traditional(Eighth);
     let qu = NoteDuration::Traditional(Quarter);
@@ -46,7 +45,7 @@ pub fn make_test_composition() -> Composition {
     ];
 
     let key = Key::new(C, SharpFlat::Natural, MajorMinor::Minor);
-    let ms_per_tick = 400;
+    let ms_per_tick = 340;
 
     let mut res = Composition::new(
         1,
@@ -59,34 +58,28 @@ pub fn make_test_composition() -> Composition {
 
     let sig = TimeSignature::new(6, 8);
 
-    // let meas_0 = Measure {
-    //     ident: 0, // Overwritten after?
-    //     key,
-    //     time_signature: sig,
-    //     tempo,
-    // };
-
     let amplitude = 0.2;
 
-    let new_e = |letter: NoteLetter, octave: u8| Note {
-        letter,
-        sharp_flat: None,
-        octave,
+    let new_e = |letter: NoteLetter, octave: u8| NotePlayed {
+        note: Note::new(letter, None, octave),
         duration: ei,
         amplitude,
     };
 
-    let new_q = |letter: NoteLetter, octave: u8| Note {
-        letter,
-        sharp_flat: None,
-        octave,
+    let new_q = |letter: NoteLetter, octave: u8| NotePlayed {
+        note: Note::new(letter, None, octave),
         duration: qu,
         amplitude,
     };
-    let new_h = |letter: NoteLetter, octave: u8| Note {
-        letter,
-        sharp_flat: None,
-        octave,
+
+    let new_q_dot = |letter: NoteLetter, octave: u8| NotePlayed {
+        note: Note::new(letter, None, octave),
+        duration: NoteDuration::Traditional(QuarterDotted),
+        amplitude,
+    };
+
+    let new_h = |letter: NoteLetter, octave: u8| NotePlayed {
+        note: Note::new(letter, None, octave),
         duration: ha,
         amplitude,
     };
@@ -177,8 +170,7 @@ pub fn make_test_composition() -> Composition {
             notes: vec![new_e(F, 3), new_e(E, 4)],
         },
         NotesStartingThisTick {
-            // todo: The F here should be q + e, but we don't support that.
-            notes: vec![new_e(G, 4), new_q(F, 5)],
+            notes: vec![new_e(G, 4), new_q_dot(F, 5)],
         },
         NotesStartingThisTick {
             notes: vec![new_q(A, 4)],
@@ -201,7 +193,13 @@ pub fn make_test_composition() -> Composition {
     res
 }
 
+fn make_test_baseline() -> Composition {
+
+}
+
 fn main() {
-    let comp = make_test_composition();
+    // let comp = make_test_composition();
+    let comp = make_test_baseline();
+
     comp.play().unwrap();
 }

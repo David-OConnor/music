@@ -8,3 +8,5 @@ rodio = "0.19"
 
 #burn = { version = "0.20.1", features = ["std", "train", "fusion", "ndarray", "autotune"], default-features = false }
 #burn-cpu = "0.20.1"
+
+rand = "0.10.1"

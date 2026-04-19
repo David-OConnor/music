@@ -15,16 +15,21 @@ pub fn play(composition: &Composition) -> io::Result<()> {
     let tick_s = composition.ms_per_tick as f32 / 1_000.0;
 
     // Determine total buffer length from the last sample any note will occupy.
-    let mut total_ticks: usize = 0;
-    for (tick_idx, slot) in composition.notes_by_tick.iter().enumerate() {
-        for note in &slot.notes {
-            let dur_ticks = note
-                .duration
-                .get_ticks(composition.ticks_per_sixteenth_note)
-                .unwrap_or(1) as usize;
-            total_ticks = total_ticks.max(tick_idx + dur_ticks);
+    let total_ticks = {
+        let mut v: usize = 0;
+
+        for (tick_idx, slot) in composition.notes_by_tick.iter().enumerate() {
+            for note in &slot.notes {
+                let dur_ticks = note
+                    .duration
+                    .get_ticks(composition.ticks_per_sixteenth_note)
+                    .unwrap_or(1) as usize;
+
+                v = v.max(tick_idx + dur_ticks);
+            }
         }
-    }
+        v
+    };
 
     if total_ticks == 0 {
         return Ok(());
@@ -78,6 +83,7 @@ pub fn play(composition: &Composition) -> io::Result<()> {
     let sink = Sink::try_new(&handle).map_err(|e| io::Error::other(e.to_string()))?;
 
     sink.append(SamplesBuffer::new(1, SAMPLE_RATE, buf));
+
     sink.sleep_until_end();
 
     Ok(())

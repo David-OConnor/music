@@ -3,24 +3,48 @@
 
 use std::io;
 
-use crate::{
-    measure::{Key, SharpFlat},
-    overtones::Temperament,
-};
+use crate::overtones::Temperament;
+use crate::key_scale::{Key, SharpFlat};
 
 /// For representing notes in sheet music, for example. Internally, we use integers to
 /// represent durations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u8)]
 pub enum NoteDurationClass {
-    Whole = 1,
-    Half = 2,
-    Quarter = 4,
-    Eighth = 8,
-    Sixteenth = 16,
-    ThirtySecond = 32,
-    SixtyFourth = 64,
-    OneTwentyEighth = 128,
+    Whole,
+    Half,
+    HalfDotted,
+    Quarter,
+    QuarterDotted,
+    Eighth,
+    EithDotted,
+    Sixteenth,
+    SixteenthDotted,
+    ThirtySecond,
+    ThirtySecondDotted,
+    SixtyFourth,
+    OneTwentyEighth,
+    Other(u8),
+}
+
+impl NoteDurationClass {
+    pub const fn val(self) -> u8 {
+        match self {
+            Self::Whole => 1,
+            Self::Half => 2,
+            Self::HalfDotted => 3,
+            Self::Quarter => 4,
+            Self::QuarterDotted => 6,
+            Self::Eighth => 8,
+            Self::EithDotted => 12,
+            Self::Sixteenth => 16,
+            Self::SixteenthDotted => 24,
+            Self::ThirtySecond => 32,
+            Self::ThirtySecondDotted => 48,
+            Self::SixtyFourth => 64,
+            Self::OneTwentyEighth => 128,
+            Self::Other(v) => v,
+        }
+    }
 }
 
 /// All integer times are in ms. All frequencies are in Hz.
@@ -35,18 +59,62 @@ pub enum NoteLetter {
     G,
 }
 
+impl NoteLetter {
+    pub fn next(self) -> NoteLetter {
+        use NoteLetter::*;
+
+        match self {
+            A => B,
+            B => C,
+            C => D,
+            D => E,
+            E => F,
+            F => G,
+            G => A,
+        }
+    }
+
+    pub fn prev(self) -> NoteLetter {
+        use NoteLetter::*;
+
+        match self {
+            A => G,
+            B => A,
+            C => B,
+            D => C,
+            E => D,
+            F => E,
+            G => F,
+        }
+    }
+}
+
+/// Suitable for playing notes
 #[derive(Clone)]
 pub struct Note {
     pub letter: NoteLetter,
     /// If none, rever to the key.
     pub sharp_flat: Option<SharpFlat>,
+    // todo: Should we break this down again, with a variant which has no octave?
     pub octave: u8,
+}
+
+impl Note {
+    pub fn new(letter: NoteLetter, sharp_flat: Option<SharpFlat>, octave: u8) -> Self {
+        Self {letter, sharp_flat, octave}
+    }
+}
+
+/// Suitable for playing notes
+#[derive(Clone)]
+pub struct NotePlayed {
+    pub note: Note,
     pub duration: NoteDuration,
     pub amplitude: f32,
 }
 
-impl Note {
-    fn natural_semitone(letter: NoteLetter) -> i32 {
+impl NotePlayed {
+    const fn natural_semitone(letter: NoteLetter) -> i32 {
         use NoteLetter::*;
 
         match letter {
@@ -76,7 +144,7 @@ impl Note {
     }
 
     fn midi_note(letter: NoteLetter, sharp_flat: SharpFlat, octave: u8) -> i32 {
-        use crate::measure::SharpFlat::*;
+        use crate::key_scale::SharpFlat::*;
 
         let semitone_in_octave = Self::natural_semitone(letter)
             + match sharp_flat {
@@ -94,14 +162,14 @@ impl Note {
     }
 
     pub fn frequency(&self, key: Key, temperament: Temperament) -> f32 {
-        use crate::measure::SharpFlat::*;
+        use crate::key_scale::SharpFlat::*;
 
-        let sf = match self.sharp_flat {
+        let sf = match self.note.sharp_flat {
             Some(sf) => sf,
-            None => Self::accidental_for_key(self.letter, key),
+            None => Self::accidental_for_key(self.note.letter, key),
         };
 
-        let midi = Self::midi_note(self.letter, sf, self.octave);
+        let midi = Self::midi_note(self.note.letter, sf, self.note.octave);
 
         match temperament {
             Temperament::Even => Self::midi_frequency(midi),
@@ -141,17 +209,13 @@ impl Note {
 
 #[cfg(test)]
 mod tests {
-    use super::{Note, NoteDuration, NoteDurationClass, NoteLetter};
-    use crate::{
-        measure::{Key, MajorMinor, SharpFlat},
-        overtones::Temperament,
-    };
+    use super::{Note, NoteDuration, NoteDurationClass, NoteLetter, NotePlayed};
+    use crate::overtones::Temperament;
+    use crate::key_scale::{Key, MajorMinor, SharpFlat};
 
-    fn note(letter: NoteLetter, sharp_flat: Option<SharpFlat>, octave: u8) -> Note {
-        Note {
-            letter,
-            sharp_flat,
-            octave,
+    fn note(letter: NoteLetter, sharp_flat: Option<SharpFlat>, octave: u8) -> NotePlayed {
+        NotePlayed {
+            note: Note::new(letter, sharp_flat, octave),
             duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
             amplitude: 1.0,
         }
@@ -273,15 +337,11 @@ pub enum ChordAugmentation {
     Augmented,
 }
 
-/// Presets which follow music conventions. Used to construct more general
-/// structures.
 pub struct Chord {
-    pub base: NoteLetter,
+    pub root: NoteLetter,
     pub chord_type: ChordType,
     pub augmentation: Option<ChordAugmentation>,
     pub octave: u8,
-    pub duration: NoteDuration,
-    pub amplitude: f32,
 }
 
 impl Chord {
@@ -289,7 +349,7 @@ impl Chord {
         use ChordAugmentation::*;
         use ChordType::*;
         use NoteLetter::*;
-        use SharpFlat::*;
+        use crate::key_scale::SharpFlat::*;
 
         // Intervals in semitones from root: [root, third, fifth]
         let intervals: [i32; 3] = match (self.chord_type, self.augmentation) {
@@ -301,7 +361,7 @@ impl Chord {
             (Minor, Some(Augmented)) => [0, 3, 8],
         };
 
-        let base_semitone = match self.base {
+        let base_semitone = match self.root {
             C => 0,
             D => 2,
             E => 4,
@@ -333,35 +393,41 @@ impl Chord {
 
                 let octave = (self.octave as i32 + abs.div_euclid(12)) as u8;
 
-                Note {
-                    letter,
-                    sharp_flat: Some(sharp_flat),
-                    octave,
-                    duration: self.duration,
-                    amplitude: self.amplitude,
-                }
+                Note::new(letter, Some(sharp_flat), octave)
             })
             .collect()
     }
 }
 
+/// Presets which follow music conventions. Used to construct more general
+/// structures.
+///
+/// ChordPlayed has duration and amplitiude, and Chord.
+pub struct ChordPlayed {
+    pub chord: Chord,
+    pub duration: NoteDuration,
+    pub amplitude: f32,
+}
+
 #[cfg(test)]
 mod chord_tests {
-    use super::{Chord, ChordType, NoteDuration, NoteDurationClass, NoteLetter};
-    use crate::measure::SharpFlat;
+    use super::{Chord, ChordPlayed, ChordType, NoteDuration, NoteDurationClass, NoteLetter};
+    use crate::key_scale::SharpFlat;
 
     #[test]
     fn chord_notes_roll_into_the_next_octave_when_needed() {
-        let chord = Chord {
-            base: NoteLetter::B,
-            chord_type: ChordType::Major,
-            augmentation: None,
-            octave: 3,
+        let chord = ChordPlayed {
+            chord: Chord {
+                root: NoteLetter::B,
+                chord_type: ChordType::Major,
+                augmentation: None,
+                octave: 3,
+            },
             duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
             amplitude: 1.0,
         };
 
-        let notes = chord.notes();
+        let notes = chord.chord.notes();
 
         assert_eq!(notes.len(), 3);
         assert_eq!(notes[0].letter, NoteLetter::B);
@@ -392,8 +458,8 @@ impl NoteDuration {
         match self {
             Self::Ticks(v) => Ok(v),
             Self::Traditional(class) => {
-                let own = class as u32;
-                let base = NoteDurationClass::Sixteenth as u32; // 16
+                let own = class.val() as u32;
+                let base = NoteDurationClass::Sixteenth.val() as u32; // 16
                 if own <= base {
                     Ok(ticks_per_sixteenth * (base / own))
                 } else {

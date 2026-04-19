@@ -4,7 +4,7 @@
 //!
 //! todo: You may need to split this into separate concepts
 
-use crate::measure::Key;
+use crate::key_scale::Key;
 
 #[derive(Clone, Copy, PartialEq, Default)]
 pub enum Temperament {
