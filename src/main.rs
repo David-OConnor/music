@@ -4,7 +4,7 @@ use chord::{Chord, ChordQuality::*};
 use key_scale::{Key, MajorMinor, SharpFlat};
 
 use crate::{
-    chord::{prog_1451, prog_1564, prog_pachabel},
+    chord::{Inversion, prog_1451, prog_1564, prog_pachabel},
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
     make_bass_music::make_bassline_random,
@@ -213,9 +213,9 @@ fn make_test_bassline() -> Composition {
     let fourth = root_note.add_interval(5);
     let fifth = root_note.add_interval(7);
 
-    let chord_c = Chord::new(root_note, Major, None, vec![]);
-    let chord_f = Chord::new(fourth, Major, None, vec![]);
-    let chord_g = Chord::new(fifth, Major, None, vec![]);
+    let chord_c = Chord::new(root_note, Major, None, vec![], Inversion::Root);
+    let chord_f = Chord::new(fourth, Major, None, vec![], Inversion::Root);
+    let chord_g = Chord::new(fifth, Major, None, vec![], Inversion::Root);
 
     let measures = vec![
         Measure::new(key, sig, Some(chord_c.clone()), 100),
@@ -283,7 +283,13 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
         .iter()
         .map(|chord| {
             let bass_root = Note::new(chord.root.letter, chord.root.sharp_flat, 3);
-            let bass_chord = Chord::new(bass_root, chord.quality, chord.extension, chord.alterations.clone());
+            let bass_chord = Chord::new(
+                bass_root,
+                chord.quality,
+                chord.extension,
+                chord.alterations.clone(),
+                Inversion::Root,
+            );
             Measure::new(key, sig, Some(bass_chord), ms_per_tick)
         })
         .collect();
@@ -340,11 +346,7 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
 
 fn main() {
     // let prog_0 = prog_1451(Key::new(NoteLetter::G, SharpFlat::Natural, MajorMinor::Major));
-    let key = Key::new(
-        NoteLetter::C,
-        SharpFlat::Natural,
-        MajorMinor::Major,
-    );
+    let key = Key::new(NoteLetter::C, SharpFlat::Sharp, MajorMinor::Minor);
     let prog = prog_pachabel(key);
 
     println!("Prog:");

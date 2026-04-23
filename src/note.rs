@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    chord::{Chord, ChordProgVal, ChordQuality},
+    chord::{Chord, ChordDegree, ChordQuality},
     key_scale::{Key, MajorMinor, SharpFlat},
     overtones::Temperament,
 };
@@ -447,21 +447,21 @@ mod tests {
 
 impl Key {
     /// Diatonic triad quality for a scale degree under major or natural minor harmony.
-    pub fn diatonic_quality(&self, degree: ChordProgVal) -> ChordQuality {
+    pub fn diatonic_quality(&self, degree: ChordDegree) -> ChordQuality {
         use MajorMinor::{Major as MajKey, Minor as MinKey};
 
         use crate::chord::{
-            ChordProgVal::*,
+            ChordDegree::*,
             ChordQuality::{Diminished, Major, Minor},
         };
 
         match (self.major_minor, degree) {
-            (MajKey, Root) | (MajKey, Four) | (MajKey, Five) => Major,
-            (MajKey, Two) | (MajKey, Three) | (MajKey, Six) => Minor,
-            (MajKey, Seven) => Diminished,
-            (MinKey, Root) | (MinKey, Four) | (MinKey, Five) => Minor,
-            (MinKey, Two) => Diminished,
-            (MinKey, Three) | (MinKey, Six) | (MinKey, Seven) => Major,
+            (MajKey, I) | (MajKey, IV) | (MajKey, V) => Major,
+            (MajKey, II) | (MajKey, III) | (MajKey, VI) => Minor,
+            (MajKey, VII) => Diminished,
+            (MinKey, I) | (MinKey, IV) | (MinKey, V) => Minor,
+            (MinKey, II) => Diminished,
+            (MinKey, III) | (MinKey, VI) | (MinKey, VII) => Major,
         }
     }
 }

@@ -12,7 +12,7 @@ use std::{io, path::Path};
 use musicxml::{datatypes as mxd, elements as mx};
 
 use crate::{
-    chord::{Chord, ChordQuality},
+    chord::{Chord, ChordQuality, Inversion},
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
     key_scale::{Key, MajorMinor, SharpFlat},
@@ -393,6 +393,7 @@ fn harmony_to_chord(h: &mx::Harmony) -> Option<Chord> {
         quality,
         extension,
         alterations,
+        Inversion::Root,
     ))
 }
 
@@ -634,8 +635,14 @@ fn make_measure_attrs(key: Key, ts: &TimeSignature, instr: Instrument, dpq: u32)
                     ..Default::default()
                 },
                 content: mx::ClefContents {
-                    sign: mx::Sign { attributes: (), content: mxd::ClefSign::G },
-                    line: Some(mx::Line { attributes: (), content: mxd::StaffLinePosition(2) }),
+                    sign: mx::Sign {
+                        attributes: (),
+                        content: mxd::ClefSign::G,
+                    },
+                    line: Some(mx::Line {
+                        attributes: (),
+                        content: mxd::StaffLinePosition(2),
+                    }),
                     clef_octave_change: None,
                 },
             },
@@ -645,8 +652,14 @@ fn make_measure_attrs(key: Key, ts: &TimeSignature, instr: Instrument, dpq: u32)
                     ..Default::default()
                 },
                 content: mx::ClefContents {
-                    sign: mx::Sign { attributes: (), content: mxd::ClefSign::F },
-                    line: Some(mx::Line { attributes: (), content: mxd::StaffLinePosition(4) }),
+                    sign: mx::Sign {
+                        attributes: (),
+                        content: mxd::ClefSign::F,
+                    },
+                    line: Some(mx::Line {
+                        attributes: (),
+                        content: mxd::StaffLinePosition(4),
+                    }),
                     clef_octave_change: None,
                 },
             },
@@ -656,8 +669,14 @@ fn make_measure_attrs(key: Key, ts: &TimeSignature, instr: Instrument, dpq: u32)
         vec![mx::Clef {
             attributes: mx::ClefAttributes::default(),
             content: mx::ClefContents {
-                sign: mx::Sign { attributes: (), content: clef_sign },
-                line: Some(mx::Line { attributes: (), content: mxd::StaffLinePosition(clef_line) }),
+                sign: mx::Sign {
+                    attributes: (),
+                    content: clef_sign,
+                },
+                line: Some(mx::Line {
+                    attributes: (),
+                    content: mxd::StaffLinePosition(clef_line),
+                }),
                 clef_octave_change: None,
             },
         }]
@@ -749,7 +768,11 @@ fn build_staff_notes(
         let group = &notes_by_tick[tick_idx];
         let filtered: Vec<&NotePlayed> = match staff_filter {
             None => group.notes.iter().collect(),
-            Some(sf) => group.notes.iter().filter(|n| n.staff.unwrap_or(1) == sf).collect(),
+            Some(sf) => group
+                .notes
+                .iter()
+                .filter(|n| n.staff.unwrap_or(1) == sf)
+                .collect(),
         };
 
         if filtered.is_empty() {
@@ -796,8 +819,14 @@ fn build_measure_notes(
     grand_staff: bool,
 ) -> Vec<mx::MeasureElement> {
     if grand_staff {
-        let mut elements =
-            build_staff_notes(tick_start, tick_count, notes_by_tick, ticks_per_sixteenth, Some(1), "1");
+        let mut elements = build_staff_notes(
+            tick_start,
+            tick_count,
+            notes_by_tick,
+            ticks_per_sixteenth,
+            Some(1),
+            "1",
+        );
         elements.push(mx::MeasureElement::Backup(mx::Backup {
             attributes: (),
             content: mx::BackupContents {
@@ -810,11 +839,23 @@ fn build_measure_notes(
             },
         }));
         elements.extend(build_staff_notes(
-            tick_start, tick_count, notes_by_tick, ticks_per_sixteenth, Some(2), "2",
+            tick_start,
+            tick_count,
+            notes_by_tick,
+            ticks_per_sixteenth,
+            Some(2),
+            "2",
         ));
         elements
     } else {
-        build_staff_notes(tick_start, tick_count, notes_by_tick, ticks_per_sixteenth, None, "1")
+        build_staff_notes(
+            tick_start,
+            tick_count,
+            notes_by_tick,
+            ticks_per_sixteenth,
+            None,
+            "1",
+        )
     }
 }
 

@@ -15,29 +15,32 @@ use crate::{
 ///
 /// This is the "I", "IV", "V" etc of chord progressions, and is a common
 /// industry abbreviated term. The numerical repr values start 1 one to match conventions.
+///
+/// We don't specify major/minor here (e.g. "VI" vs "vi"), as we determine that from
+/// the key when creating chords from this.
 #[derive(Clone, Copy, PartialEq)]
 #[repr(u8)] // todo: RM this repr if you don't use it.
-pub enum ChordProgVal {
-    Root = 1,
-    Two = 2,
-    Three = 3,
-    Four = 4,
-    Five = 5,
-    Six = 6,
-    Seven = 7,
+pub enum ChordDegree {
+    I = 1,
+    II = 2,
+    III = 3,
+    IV = 4,
+    V = 5,
+    VI = 6,
+    VII = 7,
 }
 
-impl ChordProgVal {
+impl ChordDegree {
     /// Returns the diatonic triad for this scale degree in the given key.
     /// Extensions and alterations are not included; use `Chord` directly for those.
-    pub fn get_chord(self, key: Key) -> Chord {
+    pub fn get_chord(self, key: Key, inversion: Inversion) -> Chord {
         let notes = key.get_notes();
 
         let (letter, sf) = notes[self as usize - 1];
         let root = Note::new(letter, Some(sf), 4);
         let quality = key.diatonic_quality(self);
 
-        Chord::new(root, quality, None, vec![])
+        Chord::new(root, quality, None, vec![], Inversion::Root)
     }
 }
 
@@ -110,13 +113,14 @@ impl Chord {
         quality: ChordQuality,
         extension: Option<u8>,
         alterations: Vec<(SharpFlat, u8)>,
+        inversion: Inversion,
     ) -> Self {
         Self {
             root,
             quality,
             extension,
             alterations,
-            inversion: Inversion::Root,
+            inversion,
         }
     }
 
@@ -282,44 +286,103 @@ pub enum Inversion {
     Third,
 }
 
-pub fn create_prog(key: Key, vals: &[ChordProgVal]) -> Vec<Chord> {
-    vals.iter().map(|v| v.get_chord(key)).collect()
+pub fn create_prog(key: Key, vals: &[(ChordDegree, Inversion)]) -> Vec<Chord> {
+    vals.iter()
+        .map(|(deg, inv)| deg.get_chord(key, *inv))
+        .collect()
 }
 
 // todo: These are likely temp; creating common chord progressions of poplar songs
 pub fn prog_1451(key: Key) -> Vec<Chord> {
-    use ChordProgVal::*;
-    create_prog(key, &[Root, Four, Five, Root])
+    use ChordDegree::*;
+    create_prog(
+        key,
+        &[
+            (I, Inversion::Root),
+            (IV, Inversion::Root),
+            (V, Inversion::Root),
+            (I, Inversion::Root),
+        ],
+    )
 }
 
 pub fn prog_1564(key: Key) -> Vec<Chord> {
-    use ChordProgVal::*;
-    create_prog(key, &[Root, Five, Six, Four])
+    use ChordDegree::*;
+    create_prog(
+        key,
+        &[
+            (I, Inversion::Root),
+            (V, Inversion::Root),
+            (VI, Inversion::Root),
+            (IV, Inversion::Root),
+        ],
+    )
 }
 
 pub fn prog_pachabel(key: Key) -> Vec<Chord> {
-    use ChordProgVal::*;
-    create_prog(key, &[Root, Five, Six, Three, Four])
+    use ChordDegree::*;
+    create_prog(
+        key,
+        &[
+            (I, Inversion::Root),
+            (V, Inversion::Root),
+            (VI, Inversion::Root),
+            (III, Inversion::Root),
+            (IV, Inversion::Root),
+        ],
+    )
 }
 
 pub fn prog_4565(key: Key) -> Vec<Chord> {
-    use ChordProgVal::*;
-    create_prog(key, &[Six, Five, Four, Five])
+    use ChordDegree::*;
+    create_prog(
+        key,
+        &[
+            (VI, Inversion::Root),
+            (V, Inversion::Root),
+            (IV, Inversion::Root),
+            (V, Inversion::Root),
+        ],
+    )
 }
 
 pub fn prog_1645(key: Key) -> Vec<Chord> {
-    use ChordProgVal::*;
-    create_prog(key, &[Root, Six, Four, Five])
+    use ChordDegree::*;
+    create_prog(
+        key,
+        &[
+            (I, Inversion::Root),
+            (VI, Inversion::Root),
+            (IV, Inversion::Root),
+            (V, Inversion::Root),
+        ],
+    )
 }
 
 pub fn prog_1465(key: Key) -> Vec<Chord> {
-    use ChordProgVal::*;
-    create_prog(key, &[Root, Four, Six, Five])
+    use ChordDegree::*;
+    create_prog(
+        key,
+        &[
+            (I, Inversion::Root),
+            (IV, Inversion::Root),
+            (VI, Inversion::Root),
+            (V, Inversion::Root),
+        ],
+    )
 }
 
 pub fn prog_1545(key: Key) -> Vec<Chord> {
-    use ChordProgVal::*;
-    create_prog(key, &[Root, Five, Four, Five])
+    use ChordDegree::*;
+    create_prog(
+        key,
+        &[
+            (I, Inversion::Root),
+            (V, Inversion::Root),
+            (IV, Inversion::Root),
+            (V, Inversion::Root),
+        ],
+    )
 }
 
 #[cfg(test)]
@@ -364,7 +427,7 @@ mod chord_tests {
 #[cfg(test)]
 mod chord_prog_tests {
     use crate::{
-        chord::{ChordProgVal, ChordQuality},
+        chord::{ChordDegree, ChordQuality, Inversion},
         key_scale::{Key, MajorMinor, SharpFlat},
         note::NoteLetter,
     };
@@ -378,35 +441,35 @@ mod chord_prog_tests {
 
     #[test]
     fn v_in_c_major_is_g_major() {
-        let chord = ChordProgVal::Five.get_chord(c_major());
+        let chord = ChordDegree::V.get_chord(c_major(), Inversion::Root);
         assert_eq!(chord.root.letter, NoteLetter::G);
         assert_eq!(chord.quality, ChordQuality::Major);
     }
 
     #[test]
     fn two_in_c_major_is_d_minor() {
-        let chord = ChordProgVal::Two.get_chord(c_major());
+        let chord = ChordDegree::II.get_chord(c_major(), Inversion::Root);
         assert_eq!(chord.root.letter, NoteLetter::D);
         assert_eq!(chord.quality, ChordQuality::Minor);
     }
 
     #[test]
     fn seven_in_c_major_is_b_diminished() {
-        let chord = ChordProgVal::Seven.get_chord(c_major());
+        let chord = ChordDegree::VII.get_chord(c_major(), Inversion::Root);
         assert_eq!(chord.root.letter, NoteLetter::B);
         assert_eq!(chord.quality, ChordQuality::Diminished);
     }
 
     #[test]
     fn root_in_a_minor_is_a_minor() {
-        let chord = ChordProgVal::Root.get_chord(a_minor());
+        let chord = ChordDegree::I.get_chord(a_minor(), Inversion::Root);
         assert_eq!(chord.root.letter, NoteLetter::A);
         assert_eq!(chord.quality, ChordQuality::Minor);
     }
 
     #[test]
     fn six_in_a_minor_is_f_major() {
-        let chord = ChordProgVal::Six.get_chord(a_minor());
+        let chord = ChordDegree::VI.get_chord(a_minor(), Inversion::Root);
         assert_eq!(chord.root.letter, NoteLetter::F);
         assert_eq!(chord.quality, ChordQuality::Major);
     }
