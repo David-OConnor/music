@@ -2,10 +2,7 @@
 //! This isn't required to generate a set of notes, but can help with generating, improvisation,
 //! analysis etc.
 
-use crate::{
-    key_scale::Key,
-    note::{Chord},
-};
+use crate::{chord::Chord, key_scale::Key};
 
 /// A traditional music measure.
 #[derive(Clone)]

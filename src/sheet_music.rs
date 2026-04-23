@@ -12,13 +12,12 @@ use std::{io, path::Path};
 use musicxml::{datatypes as mxd, elements as mx};
 
 use crate::{
+    chord::{Chord, ChordQuality},
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
     key_scale::{Key, MajorMinor, SharpFlat},
     measure::{Measure, TimeSignature},
-    note::{
-        Chord, ChordQuality, Note, NoteDuration, NoteDurationClass, NoteLetter, NotePlayed,
-    },
+    note::{Note, NoteDuration, NoteDurationClass, NoteLetter, NotePlayed},
     overtones::Temperament,
 };
 
@@ -385,7 +384,12 @@ fn harmony_to_chord(h: &mx::Harmony) -> Option<Chord> {
             Some((sf, deg))
         })
         .collect();
-    Some(Chord::new(Note::new(letter, sf, 4), quality, extension, alterations))
+    Some(Chord::new(
+        Note::new(letter, sf, 4),
+        quality,
+        extension,
+        alterations,
+    ))
 }
 
 // --- Tick / division arithmetic ---

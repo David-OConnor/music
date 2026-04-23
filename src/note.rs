@@ -8,7 +8,8 @@ use std::{
 };
 
 use crate::{
-    key_scale::{Key, SharpFlat},
+    chord::{Chord, ChordProgVal, ChordQuality},
+    key_scale::{Key, MajorMinor, SharpFlat},
     overtones::Temperament,
 };
 
@@ -134,7 +135,7 @@ impl NoteLetter {
 }
 
 /// Suitable for playing notes
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Note {
     pub letter: NoteLetter,
     /// If none, rever to the key.
@@ -218,7 +219,7 @@ pub struct NotePlayed {
 }
 
 impl Display for NotePlayed {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
             "{} - {} - {:.2}",
@@ -440,191 +441,24 @@ mod tests {
     }
 }
 
-/// The overall sound quality of the chord — combines what was previously separate
-/// "type" (major/minor) and "augmentation" (augmented/diminished) fields.
-#[derive(Clone, Copy, PartialEq)]
-pub enum ChordQuality {
-    Major,
-    Minor,
-    Augmented,
-    Diminished,
-}
+impl Key {
+    /// Diatonic triad quality for a scale degree under major or natural minor harmony.
+    pub fn diatonic_quality(&self, degree: ChordProgVal) -> ChordQuality {
+        use MajorMinor::{Major as MajKey, Minor as MinKey};
 
-#[derive(Clone)]
-pub struct Chord {
-    pub root: Note,
-    pub quality: ChordQuality,
-    /// Highest chord extension: 7, 9, 11, or 13. `None` = plain triad.
-    pub extension: Option<u8>,
-    /// Chromatic alterations to individual scale degrees, e.g. `(Flat, 5)` for ♭5.
-    pub alterations: Vec<(SharpFlat, u8)>,
-}
-
-impl Display for Chord {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let root_sf = match self.root.sharp_flat {
-            Some(SharpFlat::Sharp) => "#",
-            Some(SharpFlat::Flat) => "b",
-            Some(SharpFlat::Natural) | None => "",
-        };
-        match (self.quality, self.extension) {
-            (ChordQuality::Major, None) => write!(f, "{}{}", self.root.letter, root_sf)?,
-            (ChordQuality::Minor, None) => write!(f, "{}{}m", self.root.letter, root_sf)?,
-            (ChordQuality::Augmented, None) => write!(f, "{}{}aug", self.root.letter, root_sf)?,
-            (ChordQuality::Diminished, None) => write!(f, "{}{}dim", self.root.letter, root_sf)?,
-            (ChordQuality::Major, Some(ext)) => {
-                write!(f, "{}{}maj{}", self.root.letter, root_sf, ext)?
-            }
-            (ChordQuality::Minor, Some(ext)) => {
-                write!(f, "{}{}m{}", self.root.letter, root_sf, ext)?
-            }
-            (ChordQuality::Augmented, Some(ext)) => {
-                write!(f, "{}{}aug{}", self.root.letter, root_sf, ext)?
-            }
-            (ChordQuality::Diminished, Some(ext)) => {
-                write!(f, "{}{}dim{}", self.root.letter, root_sf, ext)?
-            }
-        }
-        for (sf, deg) in &self.alterations {
-            let sf_str = match sf {
-                SharpFlat::Sharp => "\u{266f}",
-                SharpFlat::Flat => "\u{266d}",
-                SharpFlat::Natural => "\u{266e}",
-            };
-            write!(f, "{}{}", sf_str, deg)?;
-        }
-        Ok(())
-    }
-}
-
-impl Chord {
-    pub fn new(
-        root: Note,
-        quality: ChordQuality,
-        extension: Option<u8>,
-        alterations: Vec<(SharpFlat, u8)>,
-    ) -> Self {
-        Self {
-            root,
-            quality,
-            extension,
-            alterations,
-        }
-    }
-}
-
-impl Chord {
-    pub fn notes(&self) -> Vec<Note> {
-        use ChordQuality::*;
-        use NoteLetter::*;
-        use SharpFlat::*;
-
-        // Base triad intervals in semitones from root
-        let mut intervals: Vec<i32> = match self.quality {
-            Major => vec![0, 4, 7],
-            Minor => vec![0, 3, 7],
-            Augmented => vec![0, 4, 8],
-            Diminished => vec![0, 3, 6],
+        use crate::chord::{
+            ChordProgVal::*,
+            ChordQuality::{Diminished, Major, Minor},
         };
 
-        // Add extension tones (stacked from 7th upward)
-        if let Some(ext) = self.extension {
-            let seventh: i32 = match self.quality {
-                Major => 11,
-                Minor | Augmented => 10,
-                Diminished => 9,
-            };
-            if ext >= 7 {
-                intervals.push(seventh);
-            }
-            if ext >= 9 {
-                intervals.push(14);
-            }
-            if ext >= 11 {
-                intervals.push(17);
-            }
-            if ext >= 13 {
-                intervals.push(21);
-            }
+        match (self.major_minor, degree) {
+            (MajKey, Root) | (MajKey, Four) | (MajKey, Five) => Major,
+            (MajKey, Two) | (MajKey, Three) | (MajKey, Six) => Minor,
+            (MajKey, Seven) => Diminished,
+            (MinKey, Root) | (MinKey, Four) | (MinKey, Five) => Minor,
+            (MinKey, Two) => Diminished,
+            (MinKey, Three) | (MinKey, Six) | (MinKey, Seven) => Major,
         }
-
-        // Apply chromatic alterations: find the interval for each scale degree and shift it
-        for &(sf, deg) in &self.alterations {
-            let base: i32 = match deg {
-                1 => 0,
-                2 => 2,
-                3 => match self.quality {
-                    Major | Augmented => 4,
-                    Minor | Diminished => 3,
-                },
-                4 => 5,
-                5 => match self.quality {
-                    Augmented => 8,
-                    Diminished => 6,
-                    _ => 7,
-                },
-                6 => 9,
-                7 => match self.quality {
-                    Major => 11,
-                    Minor | Augmented => 10,
-                    Diminished => 9,
-                },
-                9 => 14,
-                11 => 17,
-                13 => 21,
-                _ => return vec![],
-            };
-            let shift: i32 = match sf {
-                Sharp => 1,
-                Flat => -1,
-                Natural => 0,
-            };
-            for interval in &mut intervals {
-                if *interval == base {
-                    *interval += shift;
-                    break;
-                }
-            }
-        }
-
-        let sf_offset: i32 = match self.root.sharp_flat {
-            Some(Sharp) => 1,
-            Some(Flat) => -1,
-            Some(Natural) | None => 0,
-        };
-        let base_semitone: i32 = match self.root.letter {
-            C => 0,
-            D => 2,
-            E => 4,
-            F => 5,
-            G => 7,
-            A => 9,
-            B => 11,
-        } + sf_offset;
-
-        intervals
-            .iter()
-            .map(|&offset| {
-                let abs = base_semitone + offset;
-                let (letter, sharp_flat) = match abs.rem_euclid(12) {
-                    0 => (C, Natural),
-                    1 => (C, Sharp),
-                    2 => (D, Natural),
-                    3 => (D, Sharp),
-                    4 => (E, Natural),
-                    5 => (F, Natural),
-                    6 => (F, Sharp),
-                    7 => (G, Natural),
-                    8 => (G, Sharp),
-                    9 => (A, Natural),
-                    10 => (A, Sharp),
-                    11 => (B, Natural),
-                    _ => unreachable!(),
-                };
-                let octave = (self.root.octave as i32 + abs.div_euclid(12)) as u8;
-                Note::new(letter, Some(sharp_flat), octave)
-            })
-            .collect()
     }
 }
 
@@ -635,41 +469,6 @@ pub struct ChordPlayed {
     pub amplitude: f32,
 }
 
-#[cfg(test)]
-mod chord_tests {
-    use super::{Chord, ChordPlayed, ChordQuality, Note, NoteDuration, NoteDurationClass, NoteLetter};
-    use crate::key_scale::SharpFlat;
-
-    #[test]
-    fn chord_notes_roll_into_the_next_octave_when_needed() {
-        let chord = ChordPlayed {
-            chord: Chord {
-                root: Note::new(NoteLetter::B, Some(SharpFlat::Natural), 3),
-                quality: ChordQuality::Major,
-                extension: None,
-                alterations: vec![],
-            },
-            duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
-            amplitude: 1.0,
-        };
-
-        let notes = chord.chord.notes();
-
-        assert_eq!(notes.len(), 3);
-        assert_eq!(notes[0].letter, NoteLetter::B);
-        assert_eq!(notes[0].sharp_flat, Some(SharpFlat::Natural));
-        assert_eq!(notes[0].octave, 3);
-
-        assert_eq!(notes[1].letter, NoteLetter::D);
-        assert_eq!(notes[1].sharp_flat, Some(SharpFlat::Sharp));
-        assert_eq!(notes[1].octave, 4);
-
-        assert_eq!(notes[2].letter, NoteLetter::F);
-        assert_eq!(notes[2].sharp_flat, Some(SharpFlat::Sharp));
-        assert_eq!(notes[2].octave, 4);
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum NoteDuration {
     /// Relative to a specific tick size, e.g. as set at a composition level,
@@ -678,7 +477,7 @@ pub enum NoteDuration {
 }
 
 impl Display for NoteDuration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let v = match self {
             Self::Ticks(v) => format!("{v} ticks"),
             Self::Traditional(class) => class.to_string(),

@@ -1,18 +1,22 @@
 use std::path::Path;
 
+use chord::{Chord, ChordQuality::*};
 use key_scale::{Key, MajorMinor, SharpFlat};
 
 use crate::{
+    chord::{prog_1451, prog_1564, prog_pachabel},
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
-    make_bass_music::{make_bassline_ascending, make_bassline_random},
+    make_bass_music::make_bassline_random,
     measure::{Measure, TimeSignature},
     note::{Note, NoteLetter},
     overtones::Temperament,
     sheet_music::MusicXmlFormat,
 };
 
+mod chord;
 mod composition;
+mod composition_arch;
 mod decomposition;
 mod generation;
 mod instrument;
@@ -194,7 +198,7 @@ pub fn make_test_composition() -> Composition {
 fn make_test_bassline() -> Composition {
     use crate::{
         key_scale::{MajorMinor, SharpFlat::*},
-        note::{Chord, ChordQuality::*, NoteLetter::*},
+        note::NoteLetter::*,
     };
 
     let root_note = Note::new(C, None, 3);
@@ -255,5 +259,17 @@ fn main() {
 
     sheet_music::write_sheet_music(&comp, MusicXmlFormat::Raw, &test_path).unwrap();
 
-    comp.play().unwrap();
+    // let prog_0 = prog_1451(Key::new(NoteLetter::G, SharpFlat::Natural, MajorMinor::Major));
+    let prog_0 = prog_pachabel(Key::new(
+        NoteLetter::C,
+        SharpFlat::Natural,
+        MajorMinor::Major,
+    ));
+
+    println!("Prog:");
+    for chord in prog_0 {
+        println!("- {chord}")
+    }
+
+    // comp.play().unwrap();
 }

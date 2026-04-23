@@ -1,5 +1,7 @@
 //! A/R
 
+use std::fmt::{Display, Formatter};
+
 use crate::note::{Note, NoteLetter};
 
 pub struct Scale {
@@ -46,6 +48,18 @@ pub enum SharpFlat {
     Flat,
 }
 
+impl Display for SharpFlat {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let v = match self {
+            SharpFlat::Natural => "♮",
+            SharpFlat::Sharp => "♯",
+            SharpFlat::Flat => "♭",
+        };
+
+        write!(f, "{v}")
+    }
+}
+
 /// Determined by the key.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct KeySharps {
@@ -64,11 +78,32 @@ pub enum MajorMinor {
     Minor,
 }
 
+impl Display for MajorMinor {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        let v = match self {
+            Self::Major => "maj",
+            Self::Minor => "min",
+        };
+
+        write!(f, "{v}")
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Key {
     pub base_note: NoteLetter,
     pub sharp_flat: SharpFlat,
     pub major_minor: MajorMinor,
+}
+
+impl Display for Key {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {} {}",
+            self.base_note, self.sharp_flat, self.major_minor
+        )
+    }
 }
 
 impl Key {
