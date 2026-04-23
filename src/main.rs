@@ -251,25 +251,95 @@ fn make_test_bassline() -> Composition {
     comp
 }
 
+/// Make a simple composition for piano using a chord progression. 4/4 time signature. The right hand of the piano,
+/// on the treble clef, will play two half-note chords per measure. (The full chord). The left hand (bass clef)
+/// will play `make_random_baseline()` of the chord.
+///
+/// One measure per chord.
+fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
+    use crate::note::{
+        NoteDuration,
+        NoteDurationClass::{Half, Quarter},
+        NotePlayed,
+    };
+
+    let sig = TimeSignature::new(4, 4);
+    let ticks_per_sixteenth: u32 = 1;
+    let ms_per_tick = 100;
+    let amplitude = 0.2;
+    let half_dur = NoteDuration::Traditional(Half);
+
+    let measures: Vec<Measure> = chords
+        .iter()
+        .map(|chord| Measure::new(key, sig, Some(chord.clone()), ms_per_tick))
+        .collect();
+
+    // Left hand: random bassline, one note per beat
+    let mut notes = make_bassline_random(&measures, ticks_per_sixteenth, true);
+
+    // 4/4: 4 beats × 4 ticks/beat (quarter note = 4 ticks at ticks_per_sixteenth=1)
+    let ticks_per_beat = NoteDuration::Traditional(Quarter)
+        .get_ticks(ticks_per_sixteenth)
+        .unwrap();
+    let ticks_per_measure = sig.numerator as u32 * ticks_per_beat;
+    let half_ticks = half_dur.get_ticks(ticks_per_sixteenth).unwrap();
+
+    // Right hand: two half-note chord voicings per measure
+    for (i, chord) in chords.iter().enumerate() {
+        let chord_notes: Vec<NotePlayed> = chord
+            .notes()
+            .into_iter()
+            .map(|note| NotePlayed {
+                note,
+                duration: half_dur,
+                amplitude,
+            })
+            .collect();
+
+        let tick_a = i as u32 * ticks_per_measure;
+        let tick_b = tick_a + half_ticks;
+
+        notes[tick_a as usize].notes.extend(chord_notes.clone());
+        notes[tick_b as usize].notes.extend(chord_notes);
+    }
+
+    let mut comp = Composition::new(
+        ticks_per_sixteenth,
+        ms_per_tick,
+        key,
+        Temperament::WellTempered(key),
+        vec![Instrument::Piano],
+    );
+
+    comp.notes_by_tick = notes;
+    comp.measures = measures;
+
+    comp
+}
+
 fn main() {
+    // let prog_0 = prog_1451(Key::new(NoteLetter::G, SharpFlat::Natural, MajorMinor::Major));
+    let key = Key::new(
+        NoteLetter::C,
+        SharpFlat::Natural,
+        MajorMinor::Major,
+    );
+    let prog = prog_pachabel(key);
+
+    println!("Prog:");
+    for chord in &prog {
+        println!("- {chord}")
+    }
+    let comp = make_comp_from_prog(key, &prog);
+
     // let comp = make_test_composition();
-    let comp = make_test_bassline();
+    // let comp = make_test_bassline();
 
     let test_path = Path::new("./sheet_music.musicxml");
 
     sheet_music::write_sheet_music(&comp, MusicXmlFormat::Raw, &test_path).unwrap();
 
-    // let prog_0 = prog_1451(Key::new(NoteLetter::G, SharpFlat::Natural, MajorMinor::Major));
-    let prog_0 = prog_pachabel(Key::new(
-        NoteLetter::C,
-        SharpFlat::Natural,
-        MajorMinor::Major,
-    ));
 
-    println!("Prog:");
-    for chord in prog_0 {
-        println!("- {chord}")
-    }
 
-    // comp.play().unwrap();
+    comp.play().unwrap();
 }
