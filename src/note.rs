@@ -216,6 +216,9 @@ pub struct NotePlayed {
     pub note: Note,
     pub duration: NoteDuration,
     pub amplitude: f32,
+    /// Which staff this note belongs to. `None` = single-staff instrument (no `<staff>` element
+    /// emitted). `Some(1)` = treble, `Some(2)` = bass (grand-staff instruments like Piano).
+    pub staff: Option<u8>,
 }
 
 impl Display for NotePlayed {
@@ -335,6 +338,7 @@ mod tests {
             note: Note::new(letter, sharp_flat, octave),
             duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
             amplitude: 1.0,
+            staff: None,
         }
     }
 

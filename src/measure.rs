@@ -60,10 +60,11 @@ impl TimeSignature {
 
 /// For displaying in sheet music, for example
 #[derive(Clone, Copy, PartialEq)]
-pub enum Clef {
+pub enum Staff {
     Treble,
     Bass,
     Alto,
+    Grand,
 }
 
 // /// A framework of coords, by measure. This may have more applicability to music generation

@@ -58,6 +58,7 @@ pub fn make_bassline_roots(
                     note: note.clone(),
                     duration,
                     amplitude: AMPLITUDE,
+                    staff: None,
                 }],
             });
             for _ in 1..ticks_per_beat {
@@ -94,6 +95,7 @@ pub fn make_bassline_ascending(
                     note: notes[beat % notes.len()].clone(),
                     duration,
                     amplitude: AMPLITUDE,
+                    staff: None,
                 }],
             });
             for _ in 1..ticks_per_beat {
@@ -136,6 +138,7 @@ pub fn make_bassline_random(
                     note,
                     duration,
                     amplitude: AMPLITUDE,
+                    staff: None,
                 }],
             });
             for _ in 1..ticks_per_beat {

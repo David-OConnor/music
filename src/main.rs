@@ -74,24 +74,28 @@ pub fn make_test_composition() -> Composition {
         note: Note::new(letter, None, octave),
         duration: ei,
         amplitude,
+        staff: None,
     };
 
     let new_q = |letter: NoteLetter, octave: u8| NotePlayed {
         note: Note::new(letter, None, octave),
         duration: qu,
         amplitude,
+        staff: None,
     };
 
     let new_q_dot = |letter: NoteLetter, octave: u8| NotePlayed {
         note: Note::new(letter, None, octave),
         duration: NoteDuration::Traditional(QuarterDotted),
         amplitude,
+        staff: None,
     };
 
     let new_h = |letter: NoteLetter, octave: u8| NotePlayed {
         note: Note::new(letter, None, octave),
         duration: ha,
         amplitude,
+        staff: None,
     };
 
     // todo: How do we assign an instrument?
@@ -274,8 +278,24 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
         .map(|chord| Measure::new(key, sig, Some(chord.clone()), ms_per_tick))
         .collect();
 
-    // Left hand: random bassline, one note per beat
-    let mut notes = make_bassline_random(&measures, ticks_per_sixteenth, true);
+    // Left hand: use chords at octave 3 for bass register
+    let bass_measures: Vec<Measure> = chords
+        .iter()
+        .map(|chord| {
+            let bass_root = Note::new(chord.root.letter, chord.root.sharp_flat, 3);
+            let bass_chord = Chord::new(bass_root, chord.quality, chord.extension, chord.alterations.clone());
+            Measure::new(key, sig, Some(bass_chord), ms_per_tick)
+        })
+        .collect();
+
+    let mut notes = make_bassline_random(&bass_measures, ticks_per_sixteenth, true);
+
+    // Tag all bass notes as staff 2 (left hand)
+    for tick in &mut notes {
+        for note in &mut tick.notes {
+            note.staff = Some(2);
+        }
+    }
 
     // 4/4: 4 beats × 4 ticks/beat (quarter note = 4 ticks at ticks_per_sixteenth=1)
     let ticks_per_beat = NoteDuration::Traditional(Quarter)
@@ -284,7 +304,7 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
     let ticks_per_measure = sig.numerator as u32 * ticks_per_beat;
     let half_ticks = half_dur.get_ticks(ticks_per_sixteenth).unwrap();
 
-    // Right hand: two half-note chord voicings per measure
+    // Right hand: two half-note chord voicings per measure, staff 1
     for (i, chord) in chords.iter().enumerate() {
         let chord_notes: Vec<NotePlayed> = chord
             .notes()
@@ -293,6 +313,7 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
                 note,
                 duration: half_dur,
                 amplitude,
+                staff: Some(1),
             })
             .collect();
 
@@ -338,8 +359,6 @@ fn main() {
     let test_path = Path::new("./sheet_music.musicxml");
 
     sheet_music::write_sheet_music(&comp, MusicXmlFormat::Raw, &test_path).unwrap();
-
-
 
     comp.play().unwrap();
 }

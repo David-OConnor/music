@@ -207,6 +207,10 @@ fn instrument_clef(instr: Instrument) -> (mxd::ClefSign, i16) {
     }
 }
 
+fn instrument_has_grand_staff(instr: Instrument) -> bool {
+    matches!(instr, Instrument::Piano)
+}
+
 fn instrument_name(instr: Instrument) -> String {
     match instr {
         Instrument::Piano => "Piano",
@@ -437,7 +441,7 @@ fn divs_to_note_type(divs: u32, dpq: u32) -> (mxd::NoteTypeValue, bool) {
 
 // --- Note builders ---
 
-fn make_rest(divs: u32, dpq: u32) -> mx::Note {
+fn make_rest(divs: u32, dpq: u32, staff_num: Option<u8>, voice: &str) -> mx::Note {
     let (type_val, dotted) = divs_to_note_type(divs, dpq);
     let dot = if dotted {
         vec![mx::Dot {
@@ -470,7 +474,7 @@ fn make_rest(divs: u32, dpq: u32) -> mx::Note {
             level: None,
             voice: Some(mx::Voice {
                 attributes: (),
-                content: "1".to_string(),
+                content: voice.to_string(),
             }),
             r#type: Some(mx::Type {
                 attributes: mx::TypeAttributes::default(),
@@ -482,7 +486,10 @@ fn make_rest(divs: u32, dpq: u32) -> mx::Note {
             stem: None,
             notehead: None,
             notehead_text: None,
-            staff: None,
+            staff: staff_num.map(|s| mx::Staff {
+                attributes: (),
+                content: mxd::PositiveInteger(s as u32),
+            }),
             beam: vec![],
             notations: vec![],
             lyric: vec![],
@@ -493,7 +500,7 @@ fn make_rest(divs: u32, dpq: u32) -> mx::Note {
 }
 
 /// Greedy fill: decompose `gap_divs` into a sequence of rest notes from largest to smallest.
-fn fill_rests(gap_divs: u32, dpq: u32) -> Vec<mx::Note> {
+fn fill_rests(gap_divs: u32, dpq: u32, staff_num: Option<u8>, voice: &str) -> Vec<mx::Note> {
     if dpq == 0 || gap_divs == 0 {
         return vec![];
     }
@@ -514,7 +521,7 @@ fn fill_rests(gap_divs: u32, dpq: u32) -> Vec<mx::Note> {
             continue;
         }
         while remaining >= d {
-            notes.push(make_rest(d, dpq));
+            notes.push(make_rest(d, dpq, staff_num, voice));
             remaining -= d;
         }
         if remaining == 0 {
@@ -524,7 +531,13 @@ fn fill_rests(gap_divs: u32, dpq: u32) -> Vec<mx::Note> {
     notes
 }
 
-fn make_pitch_note(note: &NotePlayed, is_chord: bool, ticks_per_sixteenth: u32) -> mx::Note {
+fn make_pitch_note(
+    note: &NotePlayed,
+    is_chord: bool,
+    ticks_per_sixteenth: u32,
+    staff_num: Option<u8>,
+    voice: &str,
+) -> mx::Note {
     let dpq = divs_per_quarter(ticks_per_sixteenth);
     let divs = note_dur_to_divs(note.duration, ticks_per_sixteenth);
 
@@ -579,7 +592,7 @@ fn make_pitch_note(note: &NotePlayed, is_chord: bool, ticks_per_sixteenth: u32) 
             level: None,
             voice: Some(mx::Voice {
                 attributes: (),
-                content: "1".to_string(),
+                content: voice.to_string(),
             }),
             r#type: Some(mx::Type {
                 attributes: mx::TypeAttributes::default(),
@@ -591,7 +604,10 @@ fn make_pitch_note(note: &NotePlayed, is_chord: bool, ticks_per_sixteenth: u32) 
             stem: None,
             notehead: None,
             notehead_text: None,
-            staff: None,
+            staff: staff_num.map(|s| mx::Staff {
+                attributes: (),
+                content: mxd::PositiveInteger(s as u32),
+            }),
             beam: vec![],
             notations: vec![],
             lyric: vec![],
@@ -604,10 +620,47 @@ fn make_pitch_note(note: &NotePlayed, is_chord: bool, ticks_per_sixteenth: u32) 
 // --- Measure / score builders ---
 
 fn make_measure_attrs(key: Key, ts: &TimeSignature, instr: Instrument, dpq: u32) -> mx::Attributes {
-    let (clef_sign, clef_line) = instrument_clef(instr);
+    let grand = instrument_has_grand_staff(instr);
     let mode_val = match key.major_minor {
         MajorMinor::Major => mxd::Mode::Major,
         MajorMinor::Minor => mxd::Mode::Minor,
+    };
+
+    let clefs = if grand {
+        vec![
+            mx::Clef {
+                attributes: mx::ClefAttributes {
+                    number: Some(mxd::StaffNumber(1)),
+                    ..Default::default()
+                },
+                content: mx::ClefContents {
+                    sign: mx::Sign { attributes: (), content: mxd::ClefSign::G },
+                    line: Some(mx::Line { attributes: (), content: mxd::StaffLinePosition(2) }),
+                    clef_octave_change: None,
+                },
+            },
+            mx::Clef {
+                attributes: mx::ClefAttributes {
+                    number: Some(mxd::StaffNumber(2)),
+                    ..Default::default()
+                },
+                content: mx::ClefContents {
+                    sign: mx::Sign { attributes: (), content: mxd::ClefSign::F },
+                    line: Some(mx::Line { attributes: (), content: mxd::StaffLinePosition(4) }),
+                    clef_octave_change: None,
+                },
+            },
+        ]
+    } else {
+        let (clef_sign, clef_line) = instrument_clef(instr);
+        vec![mx::Clef {
+            attributes: mx::ClefAttributes::default(),
+            content: mx::ClefContents {
+                sign: mx::Sign { attributes: (), content: clef_sign },
+                line: Some(mx::Line { attributes: (), content: mxd::StaffLinePosition(clef_line) }),
+                clef_octave_change: None,
+            },
+        }]
     };
 
     mx::Attributes {
@@ -651,23 +704,17 @@ fn make_measure_attrs(key: Key, ts: &TimeSignature, instr: Instrument, dpq: u32)
                     senza_misura: None,
                 },
             }],
-            staves: None,
+            staves: if grand {
+                Some(mx::Staves {
+                    attributes: (),
+                    content: mxd::NonNegativeInteger(2),
+                })
+            } else {
+                None
+            },
             part_symbol: None,
             instruments: None,
-            clef: vec![mx::Clef {
-                attributes: mx::ClefAttributes::default(),
-                content: mx::ClefContents {
-                    sign: mx::Sign {
-                        attributes: (),
-                        content: clef_sign,
-                    },
-                    line: Some(mx::Line {
-                        attributes: (),
-                        content: mxd::StaffLinePosition(clef_line),
-                    }),
-                    clef_octave_change: None,
-                },
-            }],
+            clef: clefs,
             staff_details: vec![],
             transpose: vec![],
             for_part: vec![],
@@ -682,53 +729,93 @@ fn ticks_per_measure(ts: &TimeSignature, ticks_per_sixteenth: u32) -> usize {
     (ticks_per_sixteenth * 16 * ts.numerator as u32 / ts.denominator as u32) as usize
 }
 
+/// Build notes for a single staff, filtering `notes_by_tick` by `staff_filter`.
+/// `staff_filter = None` includes all notes (single-staff instruments).
+/// `staff_filter = Some(n)` includes only notes with `staff == Some(n)` (or `None` treated as 1).
+fn build_staff_notes(
+    tick_start: usize,
+    tick_count: usize,
+    notes_by_tick: &[NotesStartingThisTick],
+    ticks_per_sixteenth: u32,
+    staff_filter: Option<u8>,
+    voice: &str,
+) -> Vec<mx::MeasureElement> {
+    let dpq = divs_per_quarter(ticks_per_sixteenth);
+    let tick_end = (tick_start + tick_count).min(notes_by_tick.len());
+    let mut elements = vec![];
+    let mut filled: u32 = 0;
+
+    for tick_idx in tick_start..tick_end {
+        let group = &notes_by_tick[tick_idx];
+        let filtered: Vec<&NotePlayed> = match staff_filter {
+            None => group.notes.iter().collect(),
+            Some(sf) => group.notes.iter().filter(|n| n.staff.unwrap_or(1) == sf).collect(),
+        };
+
+        if filtered.is_empty() {
+            continue;
+        }
+
+        let tick_divs = (tick_idx - tick_start) as u32;
+        if tick_divs > filled {
+            for rest in fill_rests(tick_divs - filled, dpq, staff_filter, voice) {
+                elements.push(mx::MeasureElement::Note(rest));
+            }
+            filled = tick_divs;
+        }
+
+        let first_dur = note_dur_to_divs(filtered[0].duration, ticks_per_sixteenth);
+        for (i, note) in filtered.iter().enumerate() {
+            elements.push(mx::MeasureElement::Note(make_pitch_note(
+                note,
+                i > 0,
+                ticks_per_sixteenth,
+                staff_filter,
+                voice,
+            )));
+        }
+        filled += first_dur;
+    }
+
+    let measure_total = tick_count as u32;
+    if filled < measure_total {
+        for rest in fill_rests(measure_total - filled, dpq, staff_filter, voice) {
+            elements.push(mx::MeasureElement::Note(rest));
+        }
+    }
+
+    elements
+}
+
 /// Build the note elements for a measure slice of `notes_by_tick`.
 fn build_measure_notes(
     tick_start: usize,
     tick_count: usize,
     notes_by_tick: &[NotesStartingThisTick],
     ticks_per_sixteenth: u32,
+    grand_staff: bool,
 ) -> Vec<mx::MeasureElement> {
-    let dpq = divs_per_quarter(ticks_per_sixteenth);
-    let tick_end = (tick_start + tick_count).min(notes_by_tick.len());
-    let mut elements = vec![];
-    let mut filled: u32 = 0; // divisions consumed so far in this measure
-
-    for tick_idx in tick_start..tick_end {
-        let group = &notes_by_tick[tick_idx];
-        if group.notes.is_empty() {
-            continue;
-        }
-
-        let tick_divs = (tick_idx - tick_start) as u32;
-
-        if tick_divs > filled {
-            for rest in fill_rests(tick_divs - filled, dpq) {
-                elements.push(mx::MeasureElement::Note(rest));
-            }
-            filled = tick_divs;
-        }
-
-        let first_dur = note_dur_to_divs(group.notes[0].duration, ticks_per_sixteenth);
-        for (i, note) in group.notes.iter().enumerate() {
-            elements.push(mx::MeasureElement::Note(make_pitch_note(
-                note,
-                i > 0,
-                ticks_per_sixteenth,
-            )));
-        }
-        filled += first_dur;
+    if grand_staff {
+        let mut elements =
+            build_staff_notes(tick_start, tick_count, notes_by_tick, ticks_per_sixteenth, Some(1), "1");
+        elements.push(mx::MeasureElement::Backup(mx::Backup {
+            attributes: (),
+            content: mx::BackupContents {
+                duration: mx::Duration {
+                    attributes: (),
+                    content: mxd::PositiveDivisions(tick_count as u32),
+                },
+                footnote: None,
+                level: None,
+            },
+        }));
+        elements.extend(build_staff_notes(
+            tick_start, tick_count, notes_by_tick, ticks_per_sixteenth, Some(2), "2",
+        ));
+        elements
+    } else {
+        build_staff_notes(tick_start, tick_count, notes_by_tick, ticks_per_sixteenth, None, "1")
     }
-
-    // Trailing rests to complete the measure
-    let measure_total = tick_count as u32;
-    if filled < measure_total {
-        for rest in fill_rests(measure_total - filled, dpq) {
-            elements.push(mx::MeasureElement::Note(rest));
-        }
-    }
-
-    elements
 }
 
 fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
@@ -769,6 +856,8 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
 
     let mut part_content: Vec<mx::PartElement> = vec![];
 
+    let grand = instrument_has_grand_staff(instr);
+
     if comp.measures.is_empty() {
         let ts = TimeSignature::new(4, 4);
         let attrs = make_measure_attrs(comp.key, &ts, instr, dpq);
@@ -778,6 +867,7 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
             comp.notes_by_tick.len(),
             &comp.notes_by_tick,
             comp.ticks_per_sixteenth_note,
+            grand,
         ));
         part_content.push(mx::PartElement::Measure(mx::Measure {
             attributes: mx::MeasureAttributes {
@@ -808,6 +898,7 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
                 tick_count,
                 &comp.notes_by_tick,
                 comp.ticks_per_sixteenth_note,
+                grand,
             ));
             part_content.push(mx::PartElement::Measure(mx::Measure {
                 attributes: mx::MeasureAttributes {
@@ -998,6 +1089,7 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                             note: Note::new(letter, sf, octave),
                                             duration,
                                             amplitude: 0.8,
+                                            staff: None,
                                         });
 
                                         if !is_chord {
