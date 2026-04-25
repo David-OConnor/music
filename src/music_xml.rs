@@ -1,4 +1,4 @@
-//! Generates sheet music from a composition. MusicXML to start. Perhaps PDF too.
+//! Create Music XML from compositions, and vice versa.
 //! Supports raw .musicxml and compressed .mxl formats.
 //!
 //! We may use either the `musicxml` crate, or do this directly using an XML library.
@@ -1163,11 +1163,7 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
 
 // --- Public API ---
 
-pub fn write_sheet_music(
-    comp: &Composition,
-    format: MusicXmlFormat,
-    path: &Path,
-) -> io::Result<()> {
+pub fn write_musicxml(comp: &Composition, format: MusicXmlFormat, path: &Path) -> io::Result<()> {
     let path_str = path
         .to_str()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "non-UTF-8 path"))?;
@@ -1177,7 +1173,7 @@ pub fn write_sheet_music(
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
 }
 
-pub fn read_sheet_music(path: &Path) -> io::Result<Composition> {
+pub fn read_musicxml(path: &Path) -> io::Result<Composition> {
     let path_str = path
         .to_str()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "non-UTF-8 path"))?;

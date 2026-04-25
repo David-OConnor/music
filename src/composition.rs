@@ -2,16 +2,19 @@
 //! This does not include more primitive baseline types, but deals with
 //! combining them. This is a fuzzy notion, but helps organize the code.
 
-use std::{fmt, io};
+use std::{fmt, io, path::Path};
 
 use crate::{
     instrument::Instrument,
     key_scale::Key,
     measure::{Measure, MicroMeasure},
+    midi, music_xml,
+    music_xml::MusicXmlFormat,
     note::NotePlayed,
     overtones::Temperament,
     player,
 };
+
 // /// Used for anchoring note durations to discrete time ticks.
 // /// If note_class = NoteDuration::Eigth, and tick_time is 200ms, and eigth note is
 // /// 200ms, and there can be no sixteenth notes.
@@ -125,5 +128,21 @@ impl Composition {
 
     pub fn play(&self) -> io::Result<()> {
         player::play(self)
+    }
+
+    pub fn to_musicxml(&self, format: MusicXmlFormat, path: &Path) -> io::Result<()> {
+        music_xml::write_musicxml(self, format, path)
+    }
+
+    pub fn from_musicxml(path: &Path) -> io::Result<Self> {
+        music_xml::read_musicxml(path)
+    }
+
+    pub fn to_midi(&self, path: &Path) -> io::Result<()> {
+        music_xml::write_midi(self, path)
+    }
+
+    pub fn from_midi(path: &Path) -> io::Result<Self> {
+        midi::read_midi(path)
     }
 }

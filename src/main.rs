@@ -4,14 +4,14 @@ use chord::{Chord, ChordQuality::*};
 use key_scale::{Key, MajorMinor, SharpFlat};
 
 use crate::{
-    chord::{Inversion, prog_1451, prog_1564, prog_pachabel},
+    chord::{Inversion, prog_1451, prog_1564, prog_1645, prog_pachabel},
     composition::{Composition, NotesStartingThisTick},
     instrument::Instrument,
     make_bass_music::make_bassline_random,
     measure::{Measure, TimeSignature},
+    music_xml::MusicXmlFormat,
     note::{Note, NoteLetter},
     overtones::Temperament,
-    sheet_music::MusicXmlFormat,
 };
 
 mod chord;
@@ -23,10 +23,11 @@ mod instrument;
 mod key_scale;
 mod make_bass_music;
 mod measure;
+mod midi;
+mod music_xml;
 mod note;
 mod overtones;
 mod player;
-mod sheet_music;
 //
 
 // pub struct NotePlayed {
@@ -345,9 +346,20 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
 }
 
 fn main() {
+    // todo: Placeholders
+    // let comp = Composition::from_midi(&Path) {
+    //
+    // }
+
+    // todo: Placeholders.
+    // let comp = Composition::from_musicxml(&Path) {
+    //
+    // }
+
     // let prog_0 = prog_1451(Key::new(NoteLetter::G, SharpFlat::Natural, MajorMinor::Major));
     let key = Key::new(NoteLetter::C, SharpFlat::Sharp, MajorMinor::Minor);
-    let prog = prog_pachabel(key);
+    // let prog = prog_pachabel(key);
+    let prog = prog_1645(key);
 
     println!("Prog:");
     for chord in &prog {
@@ -360,7 +372,7 @@ fn main() {
 
     let test_path = Path::new("./sheet_music.musicxml");
 
-    sheet_music::write_sheet_music(&comp, MusicXmlFormat::Raw, &test_path).unwrap();
+    music_xml::write_musicxml(&comp, MusicXmlFormat::Raw, &test_path).unwrap();
 
     comp.play().unwrap();
 }
