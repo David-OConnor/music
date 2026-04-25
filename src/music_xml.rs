@@ -17,7 +17,7 @@ use crate::{
     instrument::Instrument,
     key_scale::{Key, MajorMinor, SharpFlat},
     measure::{Measure, TimeSignature},
-    note::{Note, NoteDuration, NoteDurationClass, NoteLetter, NotePlayed},
+    note::{Note, NoteDurationGeneral, NoteEngraving, NoteLetter, NotePlayed},
     overtones::Temperament,
 };
 
@@ -226,48 +226,44 @@ fn fifths_mode_to_key(fifths: i8, mode: MajorMinor) -> Key {
     Key::new(base, sf, mode)
 }
 
-fn duration_class_to_type_value(class: NoteDurationClass) -> mxd::NoteTypeValue {
+fn duration_class_to_type_value(class: NoteEngraving) -> mxd::NoteTypeValue {
     match class {
-        NoteDurationClass::Whole => mxd::NoteTypeValue::Whole,
-        NoteDurationClass::Half | NoteDurationClass::HalfDotted => mxd::NoteTypeValue::Half,
-        NoteDurationClass::Quarter | NoteDurationClass::QuarterDotted => {
-            mxd::NoteTypeValue::Quarter
-        }
-        NoteDurationClass::Eighth | NoteDurationClass::EithDotted => mxd::NoteTypeValue::Eighth,
-        NoteDurationClass::Sixteenth | NoteDurationClass::SixteenthDotted => {
-            mxd::NoteTypeValue::Sixteenth
-        }
-        NoteDurationClass::ThirtySecond | NoteDurationClass::ThirtySecondDotted => {
+        NoteEngraving::Whole => mxd::NoteTypeValue::Whole,
+        NoteEngraving::Half | NoteEngraving::HalfDotted => mxd::NoteTypeValue::Half,
+        NoteEngraving::Quarter | NoteEngraving::QuarterDotted => mxd::NoteTypeValue::Quarter,
+        NoteEngraving::Eighth | NoteEngraving::EithDotted => mxd::NoteTypeValue::Eighth,
+        NoteEngraving::Sixteenth | NoteEngraving::SixteenthDotted => mxd::NoteTypeValue::Sixteenth,
+        NoteEngraving::ThirtySecond | NoteEngraving::ThirtySecondDotted => {
             mxd::NoteTypeValue::ThirtySecond
         }
-        NoteDurationClass::SixtyFourth => mxd::NoteTypeValue::SixtyFourth,
-        NoteDurationClass::OneTwentyEighth => mxd::NoteTypeValue::OneHundredTwentyEighth,
-        NoteDurationClass::Other(_) => mxd::NoteTypeValue::Quarter,
+        NoteEngraving::SixtyFourth => mxd::NoteTypeValue::SixtyFourth,
+        NoteEngraving::OneTwentyEighth => mxd::NoteTypeValue::OneHundredTwentyEighth,
+        NoteEngraving::Other(_) => mxd::NoteTypeValue::Quarter,
     }
 }
 
-fn type_value_to_duration_class(tv: &mxd::NoteTypeValue) -> NoteDurationClass {
+fn type_value_to_duration_class(tv: &mxd::NoteTypeValue) -> NoteEngraving {
     match tv {
-        mxd::NoteTypeValue::Whole => NoteDurationClass::Whole,
-        mxd::NoteTypeValue::Half => NoteDurationClass::Half,
-        mxd::NoteTypeValue::Quarter => NoteDurationClass::Quarter,
-        mxd::NoteTypeValue::Eighth => NoteDurationClass::Eighth,
-        mxd::NoteTypeValue::Sixteenth => NoteDurationClass::Sixteenth,
-        mxd::NoteTypeValue::ThirtySecond => NoteDurationClass::ThirtySecond,
-        mxd::NoteTypeValue::SixtyFourth => NoteDurationClass::SixtyFourth,
-        mxd::NoteTypeValue::OneHundredTwentyEighth => NoteDurationClass::OneTwentyEighth,
-        _ => NoteDurationClass::Quarter,
+        mxd::NoteTypeValue::Whole => NoteEngraving::Whole,
+        mxd::NoteTypeValue::Half => NoteEngraving::Half,
+        mxd::NoteTypeValue::Quarter => NoteEngraving::Quarter,
+        mxd::NoteTypeValue::Eighth => NoteEngraving::Eighth,
+        mxd::NoteTypeValue::Sixteenth => NoteEngraving::Sixteenth,
+        mxd::NoteTypeValue::ThirtySecond => NoteEngraving::ThirtySecond,
+        mxd::NoteTypeValue::SixtyFourth => NoteEngraving::SixtyFourth,
+        mxd::NoteTypeValue::OneHundredTwentyEighth => NoteEngraving::OneTwentyEighth,
+        _ => NoteEngraving::Quarter,
     }
 }
 
-fn is_dotted(class: NoteDurationClass) -> bool {
+fn is_dotted(class: NoteEngraving) -> bool {
     matches!(
         class,
-        NoteDurationClass::HalfDotted
-            | NoteDurationClass::QuarterDotted
-            | NoteDurationClass::EithDotted
-            | NoteDurationClass::SixteenthDotted
-            | NoteDurationClass::ThirtySecondDotted
+        NoteEngraving::HalfDotted
+            | NoteEngraving::QuarterDotted
+            | NoteEngraving::EithDotted
+            | NoteEngraving::SixteenthDotted
+            | NoteEngraving::ThirtySecondDotted
     )
 }
 
@@ -479,7 +475,7 @@ fn divs_per_quarter(ticks_per_sixteenth: u32) -> u32 {
 }
 
 /// Convert `NoteDuration` to MusicXML division count (1 tick = 1 division).
-fn note_dur_to_divs(dur: NoteDuration, ticks_per_sixteenth: u32) -> u32 {
+fn note_dur_to_divs(dur: NoteDurationGeneral, ticks_per_sixteenth: u32) -> u32 {
     dur.get_ticks(ticks_per_sixteenth)
         .unwrap_or(ticks_per_sixteenth * 4)
 }
@@ -613,11 +609,13 @@ fn make_pitch_note(
     voice: &str,
 ) -> mx::Note {
     let dpq = divs_per_quarter(ticks_per_sixteenth);
-    let divs = note_dur_to_divs(note.duration, ticks_per_sixteenth);
+    let divs = note_dur_to_divs(note.engraving, ticks_per_sixteenth);
 
-    let (type_val, dotted) = match note.duration {
-        NoteDuration::Traditional(class) => (duration_class_to_type_value(class), is_dotted(class)),
-        NoteDuration::Ticks(_) => divs_to_note_type(divs, dpq),
+    let (type_val, dotted) = match note.engraving {
+        NoteDurationGeneral::Traditional(class) => {
+            (duration_class_to_type_value(class), is_dotted(class))
+        }
+        NoteDurationGeneral::Ticks(_) => divs_to_note_type(divs, dpq),
     };
 
     let dot = if dotted {
@@ -856,7 +854,7 @@ fn build_voice_lane_notes(
             filled = tick_divs;
         }
 
-        let first_dur = note_dur_to_divs(filtered[0].duration, ticks_per_sixteenth);
+        let first_dur = note_dur_to_divs(filtered[0].engraving, ticks_per_sixteenth);
         for (i, note) in filtered.iter().enumerate() {
             elements.push(mx::MeasureElement::Note(make_pitch_note(
                 note,
@@ -1239,38 +1237,38 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                             let has_dot = !note.content.dot.is_empty();
                                             if has_dot {
                                                 match class {
-                                                    NoteDurationClass::Half => {
-                                                        NoteDuration::Traditional(
-                                                            NoteDurationClass::HalfDotted,
+                                                    NoteEngraving::Half => {
+                                                        NoteDurationGeneral::Traditional(
+                                                            NoteEngraving::HalfDotted,
                                                         )
                                                     }
-                                                    NoteDurationClass::Quarter => {
-                                                        NoteDuration::Traditional(
-                                                            NoteDurationClass::QuarterDotted,
+                                                    NoteEngraving::Quarter => {
+                                                        NoteDurationGeneral::Traditional(
+                                                            NoteEngraving::QuarterDotted,
                                                         )
                                                     }
-                                                    NoteDurationClass::Eighth => {
-                                                        NoteDuration::Traditional(
-                                                            NoteDurationClass::EithDotted,
+                                                    NoteEngraving::Eighth => {
+                                                        NoteDurationGeneral::Traditional(
+                                                            NoteEngraving::EithDotted,
                                                         )
                                                     }
-                                                    NoteDurationClass::Sixteenth => {
-                                                        NoteDuration::Traditional(
-                                                            NoteDurationClass::SixteenthDotted,
+                                                    NoteEngraving::Sixteenth => {
+                                                        NoteDurationGeneral::Traditional(
+                                                            NoteEngraving::SixteenthDotted,
                                                         )
                                                     }
-                                                    NoteDurationClass::ThirtySecond => {
-                                                        NoteDuration::Traditional(
-                                                            NoteDurationClass::ThirtySecondDotted,
+                                                    NoteEngraving::ThirtySecond => {
+                                                        NoteDurationGeneral::Traditional(
+                                                            NoteEngraving::ThirtySecondDotted,
                                                         )
                                                     }
-                                                    _ => NoteDuration::Ticks(dur_ticks),
+                                                    _ => NoteDurationGeneral::Ticks(dur_ticks),
                                                 }
                                             } else {
-                                                NoteDuration::Traditional(class)
+                                                NoteDurationGeneral::Traditional(class)
                                             }
                                         } else {
-                                            NoteDuration::Ticks(dur_ticks)
+                                            NoteDurationGeneral::Ticks(dur_ticks)
                                         };
 
                                         let tick =
@@ -1280,7 +1278,7 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                         }
                                         comp.notes_by_tick[tick].notes.push(NotePlayed {
                                             note: Note::new(letter, sf, octave),
-                                            duration,
+                                            engraving: duration,
                                             amplitude: 0.8,
                                             staff: parse_staff_number(note.content.staff.as_ref()),
                                             voice: note
@@ -1367,7 +1365,7 @@ mod tests {
     use crate::{
         composition::NotesStartingThisTick,
         instrument::Instrument,
-        note::{Note, NoteDuration},
+        note::{Note, NoteDurationGeneral},
     };
 
     fn test_key() -> Key {
@@ -1440,7 +1438,7 @@ mod tests {
         assert_eq!(treble.voice.as_deref(), Some("1"));
         assert_eq!(
             treble.duration,
-            NoteDuration::Traditional(NoteDurationClass::Quarter)
+            NoteDurationGeneral::Traditional(NoteEngraving::Quarter)
         );
 
         let bass = composition.notes_by_tick[0]
@@ -1452,7 +1450,7 @@ mod tests {
         assert_eq!(bass.voice.as_deref(), Some("5"));
         assert_eq!(
             bass.duration,
-            NoteDuration::Traditional(NoteDurationClass::Quarter)
+            NoteDurationGeneral::Traditional(NoteEngraving::Quarter)
         );
     }
 
@@ -1468,21 +1466,21 @@ mod tests {
             notes: vec![
                 NotePlayed {
                     note: Note::new(NoteLetter::C, Some(SharpFlat::Natural), 5),
-                    duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
+                    engraving: NoteDurationGeneral::Traditional(NoteEngraving::Quarter),
                     amplitude: 0.8,
                     staff: Some(1),
                     voice: Some(String::from("1")),
                 },
                 NotePlayed {
                     note: Note::new(NoteLetter::G, Some(SharpFlat::Natural), 4),
-                    duration: NoteDuration::Traditional(NoteDurationClass::Half),
+                    engraving: NoteDurationGeneral::Traditional(NoteEngraving::Half),
                     amplitude: 0.8,
                     staff: Some(1),
                     voice: Some(String::from("2")),
                 },
                 NotePlayed {
                     note: Note::new(NoteLetter::C, Some(SharpFlat::Natural), 3),
-                    duration: NoteDuration::Traditional(NoteDurationClass::Half),
+                    engraving: NoteDurationGeneral::Traditional(NoteEngraving::Half),
                     amplitude: 0.8,
                     staff: Some(2),
                     voice: Some(String::from("5")),

@@ -390,7 +390,7 @@ mod chord_tests {
     use crate::{
         chord::{Chord, ChordQuality},
         key_scale::SharpFlat,
-        note::{ChordPlayed, Note, NoteDuration, NoteDurationClass, NoteLetter},
+        note::{ChordPlayed, Note, NoteDurationGeneral, NoteEngraving, NoteLetter},
     };
 
     #[test]
@@ -403,7 +403,7 @@ mod chord_tests {
                 alterations: vec![],
                 inversion: crate::chord::Inversion::Root,
             },
-            duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
+            duration: NoteDurationGeneral::Traditional(NoteEngraving::Quarter),
             amplitude: 1.0,
         };
 

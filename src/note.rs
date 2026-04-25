@@ -16,7 +16,7 @@ use crate::{
 /// For representing notes in sheet music, for example. Internally, we use integers to
 /// represent durations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum NoteDurationClass {
+pub enum NoteEngraving {
     Whole,
     Half,
     HalfDotted,
@@ -33,7 +33,7 @@ pub enum NoteDurationClass {
     Other(u8),
 }
 
-impl Display for NoteDurationClass {
+impl Display for NoteEngraving {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Whole => write!(f, "𝅝"),
@@ -54,7 +54,7 @@ impl Display for NoteDurationClass {
     }
 }
 
-impl NoteDurationClass {
+impl NoteEngraving {
     pub const fn val(self) -> u8 {
         match self {
             Self::Whole => 1,
@@ -210,17 +210,32 @@ impl Note {
     }
 }
 
-/// Suitable for playing notes
+/// A note played in a composition.
 #[derive(Clone)]
 pub struct NotePlayed {
     pub note: Note,
-    pub duration: NoteDuration,
+    // pub duration: NoteDurationGeneral,
+    /// 8th notes, quarter notes etc. Similar to the `type` key in MusicXml.
+    /// This is, like MusicXml, purely for notation purposes. It's usually an overcconstraint
+    /// in combination with `duration_ticks`, but differs in cases like triplets, grace notes,
+    /// swing notes etc. So, `duration` is how it should be read, while
+    pub engraving: NoteEngraving,
+    /// The number of integer ticks as part of a composition's, measure's etc divisions.
+    /// Similar to the `duration` key in MusicXml. This is for audio playback, and corresponds to
+    /// midi beats when importing and exporting. Usually corresponds directly to `engraving`, but
+    /// not always.
+    pub duration: u16,
+    /// 0. to 1.
     pub amplitude: f32,
     /// Which staff this note belongs to. `None` = single-staff instrument (no `<staff>` element
     /// emitted). `Some(1)` = treble, `Some(2)` = bass (grand-staff instruments like Piano).
-    pub staff: Option<u8>,
+    pub staff: Option<usize>,
     /// Optional MusicXML voice identifier used to keep simultaneous same-staff lines independent.
-    pub voice: Option<String>,
+    /// Used to deconflict notes for displaying on sheet music. Notably comes up on
+    /// piano and other multi-note instruments. Similar to the implementation in MusicXml.
+    ///
+    /// This can remain at 0 if there is only one voice in the composition, measure etc.
+    pub voice: usize,
 }
 
 impl Display for NotePlayed {
@@ -228,7 +243,7 @@ impl Display for NotePlayed {
         write!(
             f,
             "{} - {} - {:.2}",
-            self.note, self.duration, self.amplitude
+            self.note, self.engraving, self.amplitude
         )
     }
 }
@@ -329,7 +344,7 @@ impl NotePlayed {
 
 #[cfg(test)]
 mod tests {
-    use super::{Note, NoteDuration, NoteDurationClass, NoteLetter, NotePlayed};
+    use super::{Note, NoteDurationGeneral, NoteEngraving, NoteLetter, NotePlayed};
     use crate::{
         key_scale::{Key, MajorMinor, SharpFlat},
         overtones::Temperament,
@@ -338,10 +353,11 @@ mod tests {
     fn note(letter: NoteLetter, sharp_flat: Option<SharpFlat>, octave: u8) -> NotePlayed {
         NotePlayed {
             note: Note::new(letter, sharp_flat, octave),
-            duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
+            // duration: NoteDurationGeneral::Traditional(NoteDuration::Quarter),
+            engraving: NoteEngraving::Quarter,
             amplitude: 1.0,
             staff: None,
-            voice: None,
+            voice: 0,
         }
     }
 
@@ -472,18 +488,18 @@ impl Key {
 /// ChordPlayed has duration and amplitude, and Chord.
 pub struct ChordPlayed {
     pub chord: Chord,
-    pub duration: NoteDuration,
+    pub duration: NoteDurationGeneral,
     pub amplitude: f32,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum NoteDuration {
+pub enum NoteDurationGeneral {
     /// Relative to a specific tick size, e.g. as set at a composition level,
     Ticks(u32),
-    Traditional(NoteDurationClass),
+    Traditional(NoteEngraving),
 }
 
-impl Display for NoteDuration {
+impl Display for NoteDurationGeneral {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let v = match self {
             Self::Ticks(v) => format!("{v} ticks"),
@@ -494,27 +510,31 @@ impl Display for NoteDuration {
     }
 }
 
-impl NoteDuration {
+impl NoteDurationGeneral {
     // pub fn get_ticks(self, tick_base: TickBase) -> u32 {
     // pub fn get_ticks(self, tick_base: NoteDurationClass) -> io::Result<u32> {
     pub fn get_ticks(self, ticks_per_sixteenth: u32) -> io::Result<u32> {
         match self {
             Self::Ticks(v) => Ok(v),
-            Self::Traditional(class) => {
-                let own = class.val() as u32;
-                let base = NoteDurationClass::Sixteenth.val() as u32; // 16
-                if own <= base {
-                    Ok(ticks_per_sixteenth * (base / own))
-                } else {
-                    let divisor = own / base;
-                    if ticks_per_sixteenth % divisor != 0 {
-                        Err(io::Error::other(format!(
-                            "Cannot represent 1/{own} note cleanly with {ticks_per_sixteenth} ticks per sixteenth"
-                        )))
-                    } else {
-                        Ok(ticks_per_sixteenth / divisor)
-                    }
-                }
+            Self::Traditional(class) => class.get_ticks(ticks_per_sixteenth),
+        }
+    }
+}
+
+impl NoteEngraving {
+    pub fn get_ticks(self, ticks_per_sixteenth: u32) -> io::Result<u32> {
+        let own = self.val() as u32;
+        let base = NoteEngraving::Sixteenth.val() as u32; // 16
+        if own <= base {
+            Ok(ticks_per_sixteenth * (base / own))
+        } else {
+            let divisor = own / base;
+            if ticks_per_sixteenth % divisor != 0 {
+                Err(io::Error::other(format!(
+                    "Cannot represent 1/{own} note cleanly with {ticks_per_sixteenth} ticks per sixteenth"
+                )))
+            } else {
+                Ok(ticks_per_sixteenth / divisor)
             }
         }
     }

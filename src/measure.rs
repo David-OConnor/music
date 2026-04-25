@@ -1,46 +1,45 @@
 //! For dividing a composition into measures.
-//! This isn't required to generate a set of notes, but can help with generating, improvisation,
-//! analysis etc.
 
-use crate::{chord::Chord, key_scale::Key};
+use crate::{chord::Chord, key_scale::Key, note::NotePlayed};
 
-/// A traditional music measure.
+/// A traditional music measure. We also use this as a fundamental part of how we
+/// store notes in compositions, and managing subdividing compositions into integer
+/// time ticks. This somewhat follows how MusicXML defines measures, but only loosely
 #[derive(Clone)]
 pub struct Measure {
-    // todo: Do we want this? For assigning finer divisions to.
-    pub ident: u32,
     pub key: Key,
     pub time_signature: TimeSignature,
-    pub tempo: u32,
+    /// Beats per minute
+    pub tempo: u16,
     pub chord: Option<Chord>,
+    /// Index determines visual position if displaying sheet music; top to bottom.
+    pub staves: Vec<Staff>,
+    // /// Used to deconflict notes for displaying on sheet music. Notably comes up on
+    // /// piano and other multi-note instruments. Similar to the implementation in MusicXml.
+    // pub num_voices: usize,
+    /// Number of divisions in this set. Higher means more precise.
+    /// 12, 16, and 32 are convenient defaults. This is the same concept as divisions in
+    /// MusicXml.
+    ///
+    /// Note: MIDI uses the concept of "pulses per quarter note". 96 is a historical default,
+    /// and DAWS may default to 960. Higher means more precision.
+    pub divisions: u16,
+    pub notes: Vec<NotePlayed>,
 }
 
 impl Measure {
-    pub fn new(key: Key, time_signature: TimeSignature, chord: Option<Chord>, tempo: u32) -> Self {
+    pub fn new(key: Key, time_signature: TimeSignature, chord: Option<Chord>, tempo: u16) -> Self {
         Self {
-            ident: 0,
             key,
             time_signature,
             chord,
             tempo,
+            staves: vec![Staff::Grand],
+            // num_voices: 0,
+            divisions: 32,
+            notes: Vec::new(),
         }
     }
-}
-
-impl Measure {
-    pub fn to_micro_measure(&self) -> Vec<MicroMeasure> {
-        let mut res = Vec::new();
-
-        res
-    }
-}
-
-/// Describes all actions at the coarsest time granularity which can describe a given instant.
-/// It describes everything which is happening at thi state. When used to play a composition,
-/// for example, this is what is generated. We compose this from coarser constructs.
-pub struct MicroMeasure {
-    /// ms. We use the largest
-    pub duration: u32,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -58,20 +57,18 @@ impl TimeSignature {
     }
 }
 
-/// For displaying in sheet music, for example
+/// For displaying in sheet music, for example.
+/// todo: Call it Clef?
 #[derive(Clone, Copy, PartialEq)]
 pub enum Staff {
     Treble,
     Bass,
     Alto,
+    /// Treble and bass
     Grand,
+    Tenor,
+    Soprano,
+    MezzoSoprano,
+    Baritone,
+    Subbass,
 }
-
-// /// A framework of coords, by measure. This may have more applicability to music generation
-// /// than as a fundamental representation of a work.
-// pub struct ChordProgression {
-//     /// Indexed by measure. These sets can be composed into a broader structure.
-//     pub subsets: Vec<Vec<Chord>>,
-//     /// (subset index, repetitions)
-//     pub sets: Vec<(usize, usize)>,
-// }

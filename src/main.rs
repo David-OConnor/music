@@ -12,7 +12,7 @@ use crate::{
     make_bass_music::make_bassline_random,
     measure::{Measure, TimeSignature},
     music_xml::MusicXmlFormat,
-    note::{Note, NoteLetter},
+    note::{Note, NoteEngraving, NoteLetter},
     overtones::Temperament,
 };
 
@@ -55,11 +55,16 @@ impl eframe::App for State {
 /// The opening of *Alicia* from the Expedition 33 sound track.
 pub fn make_test_composition() -> Composition {
     use measure::TimeSignature;
-    use note::{NoteDuration, NoteDurationClass::*, NoteLetter::*, NotePlayed};
+    use note::{NoteDurationGeneral, NoteEngraving::*, NoteLetter::*, NotePlayed};
 
-    let ei = NoteDuration::Traditional(Eighth);
-    let qu = NoteDuration::Traditional(Quarter);
-    let ha = NoteDuration::Traditional(Half);
+    // let ei = NoteDurationGeneral::Traditional(Eighth);
+    // let qu = NoteDurationGeneral::Traditional(Quarter);
+    // let ha = NoteDurationGeneral::Traditional(Half);
+
+    let ei = Eighth;
+    let qu = Quarter;
+    let ha = Half;
+
     let instruments = vec![
         Instrument::Violin, // Treble clef
         Instrument::BassGuitar,
@@ -69,8 +74,8 @@ pub fn make_test_composition() -> Composition {
     let ms_per_tick = 340;
 
     let mut res = Composition::new(
-        1,
-        ms_per_tick,
+        // 1,
+        // ms_per_tick,
         key,
         // Temperament::Even,
         Temperament::WellTempered(key),
@@ -83,7 +88,7 @@ pub fn make_test_composition() -> Composition {
 
     let new_e = |letter: NoteLetter, octave: u8| NotePlayed {
         note: Note::new(letter, None, octave),
-        duration: ei,
+        engraving: ei,
         amplitude,
         staff: None,
         voice: None,
@@ -91,7 +96,7 @@ pub fn make_test_composition() -> Composition {
 
     let new_q = |letter: NoteLetter, octave: u8| NotePlayed {
         note: Note::new(letter, None, octave),
-        duration: qu,
+        engraving: qu,
         amplitude,
         staff: None,
         voice: None,
@@ -99,7 +104,7 @@ pub fn make_test_composition() -> Composition {
 
     let new_q_dot = |letter: NoteLetter, octave: u8| NotePlayed {
         note: Note::new(letter, None, octave),
-        duration: NoteDuration::Traditional(QuarterDotted),
+        engraving: NoteDurationGeneral::Traditional(QuarterDotted),
         amplitude,
         staff: None,
         voice: None,
@@ -107,7 +112,7 @@ pub fn make_test_composition() -> Composition {
 
     let new_h = |letter: NoteLetter, octave: u8| NotePlayed {
         note: Note::new(letter, None, octave),
-        duration: ha,
+        engraving: ha,
         amplitude,
         staff: None,
         voice: None,
@@ -277,8 +282,8 @@ fn make_test_bassline() -> Composition {
 /// One measure per chord.
 fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
     use crate::note::{
-        NoteDuration,
-        NoteDurationClass::{Half, Quarter},
+        NoteDurationGeneral,
+        NoteEngraving::{Half, Quarter},
         NotePlayed,
     };
 
@@ -286,7 +291,7 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
     let ticks_per_sixteenth: u32 = 1;
     let ms_per_tick = 100;
     let amplitude = 0.2;
-    let half_dur = NoteDuration::Traditional(Half);
+    // let half_dur = NoteDurationGeneral::Traditional(Half);
 
     let measures: Vec<Measure> = chords
         .iter()
@@ -319,11 +324,11 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
     }
 
     // 4/4: 4 beats × 4 ticks/beat (quarter note = 4 ticks at ticks_per_sixteenth=1)
-    let ticks_per_beat = NoteDuration::Traditional(Quarter)
+    let ticks_per_beat = NoteDurationGeneral::Traditional(Quarter)
         .get_ticks(ticks_per_sixteenth)
         .unwrap();
     let ticks_per_measure = sig.numerator as u32 * ticks_per_beat;
-    let half_ticks = half_dur.get_ticks(ticks_per_sixteenth).unwrap();
+    let half_ticks = Half.get_ticks(ticks_per_sixteenth).unwrap();
 
     // Right hand: two half-note chord voicings per measure, staff 1
     for (i, chord) in chords.iter().enumerate() {
@@ -332,7 +337,7 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
             .into_iter()
             .map(|note| NotePlayed {
                 note,
-                duration: half_dur,
+                engraving: Half,
                 amplitude,
                 staff: Some(1),
                 voice: None,
@@ -347,8 +352,8 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
     }
 
     let mut comp = Composition::new(
-        ticks_per_sixteenth,
-        ms_per_tick,
+        // ticks_per_sixteenth,
+        // ms_per_tick,
         key,
         Temperament::WellTempered(key),
         vec![Instrument::Piano],

@@ -11,7 +11,7 @@ use crate::{
     instrument::Instrument,
     key_scale::{Key, MajorMinor, SharpFlat},
     measure::{Measure, TimeSignature},
-    note::{Note, NoteDuration, NoteLetter, NotePlayed},
+    note::{Note, NoteDurationGeneral, NoteLetter, NotePlayed},
     overtones::Temperament,
 };
 
@@ -1132,7 +1132,7 @@ fn parse_smf(bytes: &[u8]) -> io::Result<Composition> {
             .notes
             .push(NotePlayed {
                 note: midi_pitch_to_note(note.pitch, active_key),
-                duration: NoteDuration::Ticks(duration),
+                engraving: NoteDurationGeneral::Ticks(duration),
                 amplitude: velocity_to_amplitude(note.velocity),
                 staff: None,
                 voice: None,
@@ -1172,7 +1172,7 @@ mod tests {
         instrument::Instrument,
         key_scale::{Key, MajorMinor, SharpFlat},
         measure::{Measure, TimeSignature},
-        note::{Note, NoteDuration, NoteLetter, NotePlayed},
+        note::{Note, NoteDurationGeneral, NoteLetter, NotePlayed},
         overtones::Temperament,
     };
 
@@ -1180,7 +1180,7 @@ mod tests {
         comp: &mut Composition,
         tick: usize,
         note: Note,
-        duration: NoteDuration,
+        duration: NoteDurationGeneral,
         amplitude: f32,
     ) {
         while comp.notes_by_tick.len() <= tick {
@@ -1188,7 +1188,7 @@ mod tests {
         }
         comp.notes_by_tick[tick].notes.push(NotePlayed {
             note,
-            duration,
+            engraving: duration,
             amplitude,
             staff: None,
             voice: None,
@@ -1208,21 +1208,21 @@ mod tests {
             &mut comp,
             0,
             Note::new(NoteLetter::G, Some(SharpFlat::Natural), 4),
-            NoteDuration::Traditional(crate::note::NoteDurationClass::Quarter),
+            NoteDurationGeneral::Traditional(crate::note::NoteEngraving::Quarter),
             0.75,
         );
         push_note(
             &mut comp,
             4,
             Note::new(NoteLetter::F, None, 4),
-            NoteDuration::Traditional(crate::note::NoteDurationClass::Quarter),
+            NoteDurationGeneral::Traditional(crate::note::NoteEngraving::Quarter),
             0.5,
         );
         push_note(
             &mut comp,
             8,
             Note::new(NoteLetter::D, Some(SharpFlat::Natural), 5),
-            NoteDuration::Ticks(2),
+            NoteDurationGeneral::Ticks(2),
             0.9,
         );
 
@@ -1240,7 +1240,7 @@ mod tests {
         assert_eq!(parsed.notes_by_tick[0].notes[0].note.letter, NoteLetter::G);
         assert_eq!(
             parsed.notes_by_tick[0].notes[0].duration,
-            NoteDuration::Ticks(4)
+            NoteDurationGeneral::Ticks(4)
         );
 
         assert_eq!(parsed.notes_by_tick[4].notes[0].note.letter, NoteLetter::F);
@@ -1250,7 +1250,7 @@ mod tests {
         );
         assert_eq!(
             parsed.notes_by_tick[8].notes[0].duration,
-            NoteDuration::Ticks(2)
+            NoteDurationGeneral::Ticks(2)
         );
     }
 
@@ -1282,7 +1282,7 @@ mod tests {
         assert_eq!(comp.notes_by_tick[0].notes[0].note.letter, NoteLetter::C);
         assert_eq!(
             comp.notes_by_tick[0].notes[0].duration,
-            NoteDuration::Ticks(4)
+            NoteDurationGeneral::Ticks(4)
         );
     }
 }

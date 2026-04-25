@@ -5,27 +5,27 @@ use rand::RngExt;
 use crate::{
     composition::NotesStartingThisTick,
     measure::Measure,
-    note::{Note, NoteDuration, NoteDurationClass, NotePlayed},
+    note::{Note, NoteDurationGeneral, NoteEngraving, NotePlayed},
 };
 
 const AMPLITUDE: f32 = 0.2;
 
-fn beat_duration(denominator: u8) -> NoteDurationClass {
+fn beat_duration(denominator: u8) -> NoteEngraving {
     match denominator {
-        1 => NoteDurationClass::Whole,
-        2 => NoteDurationClass::Half,
-        4 => NoteDurationClass::Quarter,
-        8 => NoteDurationClass::Eighth,
-        16 => NoteDurationClass::Sixteenth,
-        32 => NoteDurationClass::ThirtySecond,
-        64 => NoteDurationClass::SixtyFourth,
-        128 => NoteDurationClass::OneTwentyEighth,
-        _ => NoteDurationClass::Quarter,
+        1 => NoteEngraving::Whole,
+        2 => NoteEngraving::Half,
+        4 => NoteEngraving::Quarter,
+        8 => NoteEngraving::Eighth,
+        16 => NoteEngraving::Sixteenth,
+        32 => NoteEngraving::ThirtySecond,
+        64 => NoteEngraving::SixtyFourth,
+        128 => NoteEngraving::OneTwentyEighth,
+        _ => NoteEngraving::Quarter,
     }
 }
 
 fn beat_ticks(denominator: u8, ticks_per_sixteenth: u32) -> u32 {
-    let dur = NoteDuration::Traditional(beat_duration(denominator));
+    let dur = NoteDurationGeneral::Traditional(beat_duration(denominator));
     dur.get_ticks(ticks_per_sixteenth)
         .unwrap_or(ticks_per_sixteenth * 4)
 }
@@ -47,7 +47,7 @@ pub fn make_bassline_roots(
         };
 
         let ts = meas.time_signature;
-        let duration = NoteDuration::Traditional(beat_duration(ts.denominator));
+        let duration = NoteDurationGeneral::Traditional(beat_duration(ts.denominator));
         let ticks_per_beat = beat_ticks(ts.denominator, ticks_per_sixteenth);
         let octave = octaves[rng.random_range(0..octaves.len())];
         let note = Note::new(chord.root.letter, chord.root.sharp_flat, octave);
@@ -56,7 +56,7 @@ pub fn make_bassline_roots(
             res.push(NotesStartingThisTick {
                 notes: vec![NotePlayed {
                     note: note.clone(),
-                    duration,
+                    engraving: duration,
                     amplitude: AMPLITUDE,
                     staff: None,
                     voice: None,
@@ -86,7 +86,7 @@ pub fn make_bassline_ascending(
         };
 
         let ts = meas.time_signature;
-        let duration = NoteDuration::Traditional(beat_duration(ts.denominator));
+        let duration = NoteDurationGeneral::Traditional(beat_duration(ts.denominator));
         let ticks_per_beat = beat_ticks(ts.denominator, ticks_per_sixteenth);
         let notes = chord.notes();
 
@@ -94,7 +94,7 @@ pub fn make_bassline_ascending(
             res.push(NotesStartingThisTick {
                 notes: vec![NotePlayed {
                     note: notes[beat % notes.len()].clone(),
-                    duration,
+                    engraving: duration,
                     amplitude: AMPLITUDE,
                     staff: None,
                     voice: None,
@@ -125,7 +125,7 @@ pub fn make_bassline_random(
         };
 
         let ts = meas.time_signature;
-        let duration = NoteDuration::Traditional(beat_duration(ts.denominator));
+        let duration = NoteDurationGeneral::Traditional(beat_duration(ts.denominator));
         let ticks_per_beat = beat_ticks(ts.denominator, ticks_per_sixteenth);
         let notes = chord.notes();
 
@@ -138,7 +138,7 @@ pub fn make_bassline_random(
             res.push(NotesStartingThisTick {
                 notes: vec![NotePlayed {
                     note,
-                    duration,
+                    engraving: duration,
                     amplitude: AMPLITUDE,
                     staff: None,
                     voice: None,

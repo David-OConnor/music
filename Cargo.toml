@@ -9,8 +9,8 @@ rodio = "0.22.2"
 #burn = { version = "0.20.1", features = ["std", "train", "fusion", "ndarray", "autotune"], default-features = false }
 #burn-cpu = "0.20.1"
 
-eframe = "0.34.1"
 egui = "0.34.1"
+eframe = "0.34.1"
 
 rand = "0.10.1"
 musicxml = "1.1.2"
