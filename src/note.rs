@@ -36,19 +36,19 @@ pub enum NoteDurationClass {
 impl Display for NoteDurationClass {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Whole => write!(f, "whole"),
-            Self::Half => write!(f, "half"),
-            Self::HalfDotted => write!(f, "half."),
-            Self::Quarter => write!(f, "quarter"),
-            Self::QuarterDotted => write!(f, "quarter."),
-            Self::Eighth => write!(f, "eighth"),
-            Self::EithDotted => write!(f, "eighth."),
-            Self::Sixteenth => write!(f, "16th"),
-            Self::SixteenthDotted => write!(f, "16th."),
-            Self::ThirtySecond => write!(f, "32nd"),
-            Self::ThirtySecondDotted => write!(f, "32nd."),
-            Self::SixtyFourth => write!(f, "64th"),
-            Self::OneTwentyEighth => write!(f, "128th"),
+            Self::Whole => write!(f, "𝅝"),
+            Self::Half => write!(f, "𝅗𝅥"),
+            Self::HalfDotted => write!(f, "𝅗𝅥·"),
+            Self::Quarter => write!(f, "𝅘𝅥"),
+            Self::QuarterDotted => write!(f, "𝅘𝅥·"),
+            Self::Eighth => write!(f, "𝅘𝅥𝅮·"),
+            Self::EithDotted => write!(f, "𝅘𝅥𝅮·"),
+            Self::Sixteenth => write!(f, "𝅘𝅥𝅯"),
+            Self::SixteenthDotted => write!(f, "𝅘𝅥𝅯·"),
+            Self::ThirtySecond => write!(f, "𝅘𝅥𝅰"),
+            Self::ThirtySecondDotted => write!(f, "𝅘𝅥𝅰·"),
+            Self::SixtyFourth => write!(f, "𝅘𝅥𝅱"),
+            Self::OneTwentyEighth => write!(f, "𝅘𝅥𝅲"),
             Self::Other(v) => write!(f, "1/{v}"),
         }
     }
@@ -219,6 +219,8 @@ pub struct NotePlayed {
     /// Which staff this note belongs to. `None` = single-staff instrument (no `<staff>` element
     /// emitted). `Some(1)` = treble, `Some(2)` = bass (grand-staff instruments like Piano).
     pub staff: Option<u8>,
+    /// Optional MusicXML voice identifier used to keep simultaneous same-staff lines independent.
+    pub voice: Option<String>,
 }
 
 impl Display for NotePlayed {
@@ -339,6 +341,7 @@ mod tests {
             duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
             amplitude: 1.0,
             staff: None,
+            voice: None,
         }
     }
 

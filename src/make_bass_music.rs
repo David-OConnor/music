@@ -59,6 +59,7 @@ pub fn make_bassline_roots(
                     duration,
                     amplitude: AMPLITUDE,
                     staff: None,
+                    voice: None,
                 }],
             });
             for _ in 1..ticks_per_beat {
@@ -96,6 +97,7 @@ pub fn make_bassline_ascending(
                     duration,
                     amplitude: AMPLITUDE,
                     staff: None,
+                    voice: None,
                 }],
             });
             for _ in 1..ticks_per_beat {
@@ -139,6 +141,7 @@ pub fn make_bassline_random(
                     duration,
                     amplitude: AMPLITUDE,
                     staff: None,
+                    voice: None,
                 }],
             });
             for _ in 1..ticks_per_beat {

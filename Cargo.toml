@@ -4,10 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rodio = "0.19"
+rodio = "0.22.2"
 
 #burn = { version = "0.20.1", features = ["std", "train", "fusion", "ndarray", "autotune"], default-features = false }
 #burn-cpu = "0.20.1"
 
+eframe = "0.34.1"
+egui = "0.34.1"
+
 rand = "0.10.1"
-musicxml = "1.1.2"  # todo: If this is more difficult than XML directly, ditch it.
+musicxml = "1.1.2"

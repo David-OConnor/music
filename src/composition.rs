@@ -2,7 +2,7 @@
 //! This does not include more primitive baseline types, but deals with
 //! combining them. This is a fuzzy notion, but helps organize the code.
 
-use std::{fmt, io, path::Path};
+use std::{fmt, fmt::Display, io, path::Path};
 
 use crate::{
     instrument::Instrument,
@@ -15,24 +15,7 @@ use crate::{
     player,
 };
 
-// /// Used for anchoring note durations to discrete time ticks.
-// /// If note_class = NoteDuration::Eigth, and tick_time is 200ms, and eigth note is
-// /// 200ms, and there can be no sixteenth notes.
-// pub struct TickBase {
-//     /// This note duration is which note is tick_time in real time units.
-//     /// Finest duration in the set.
-//     pub note_class: NoteDurationClass,
-//     /// ms
-//     pub tick_time: u32,
-// }
-
-// impl TickBase {
-//     pub fn new(note_class: NoteDurationClass, tick_time: u32) -> Self {
-//         Self { note_class, tick_time }
-//     }
-// }
-
-/// Likely tentative. Represents all notes which start in a single tick. Will have one note for single notes,
+/// Represents all notes which start in a single tick. Will have one note for single notes,
 /// multiple notes for coords. This is only the notes which *start* this tick.
 pub struct NotesStartingThisTick {
     pub notes: Vec<NotePlayed>,
@@ -56,6 +39,7 @@ impl fmt::Display for NotesStartingThisTick {
 /// and are expanding it to be more general, so as not to be restricted to traditional
 /// western music conventions.
 pub struct Composition {
+    pub title: String,
     /// We use this to scale the NoteDurationClass (16th notes, 8th notes etc) with
     /// the underlying integer tick system. Set to 1 if there is truly no time interval
     /// finer than a 16th note.
@@ -73,6 +57,22 @@ pub struct Composition {
     pub temperament: Temperament,
 }
 
+impl Display for Composition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "{} - {} | {} measures | {} ms/tick, {} ticks per 16th note",
+            self.title,
+            self.key,
+            self.measures.len(),
+            self.ms_per_tick,
+            self.ticks_per_sixteenth_note
+        )?;
+
+        Ok(())
+    }
+}
+
 impl Composition {
     /// todo: If there are too many params, add a config struct.
     pub fn new(
@@ -85,6 +85,7 @@ impl Composition {
         instruments: Vec<Instrument>,
     ) -> Self {
         Self {
+            title: String::new(),
             ticks_per_sixteenth_note,
             ms_per_tick,
             instruments,
@@ -122,27 +123,23 @@ impl Composition {
         vec![]
     }
 
-    pub fn make_sheet_music(&self) {
-        unimplemented!()
-    }
-
     pub fn play(&self) -> io::Result<()> {
         player::play(self)
     }
 
-    pub fn to_musicxml(&self, format: MusicXmlFormat, path: &Path) -> io::Result<()> {
+    pub fn save_musicxml(&self, format: MusicXmlFormat, path: &Path) -> io::Result<()> {
         music_xml::write_musicxml(self, format, path)
     }
 
-    pub fn from_musicxml(path: &Path) -> io::Result<Self> {
+    pub fn load_musicxml(path: &Path) -> io::Result<Self> {
         music_xml::read_musicxml(path)
     }
 
-    pub fn to_midi(&self, path: &Path) -> io::Result<()> {
-        music_xml::write_midi(self, path)
+    pub fn save_midi(&self, path: &Path) -> io::Result<()> {
+        midi::write_midi(self, path)
     }
 
-    pub fn from_midi(path: &Path) -> io::Result<Self> {
+    pub fn load_midi(path: &Path) -> io::Result<Self> {
         midi::read_midi(path)
     }
 }

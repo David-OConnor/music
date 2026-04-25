@@ -6,5 +6,7 @@ Cargo.lock
 /.claude
 
 
+# File formats
 *.musicxml
 *.mxl
+*.mid

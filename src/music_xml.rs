@@ -7,7 +7,7 @@
 //!
 //! MusicXML standard: https://w3c-cg.github.io/musicxml/
 
-use std::{io, path::Path};
+use std::{fs, io, path::Path};
 
 use musicxml::{datatypes as mxd, elements as mx};
 
@@ -41,6 +41,79 @@ impl MusicXmlFormat {
             _ => Self::Raw,
         }
     }
+}
+
+const MUSICXML_3_PARTWISE_DOCTYPE: &str = "<!DOCTYPE score-partwise PUBLIC \"-//Recordare//DTD MusicXML 3.0 Partwise//EN\" \"http://www.musicxml.org/dtds/partwise.dtd\">";
+const MUSICXML_4_PARTWISE_DOCTYPE: &str = "<!DOCTYPE score-partwise PUBLIC \"-//Recordare//DTD MusicXML 4.0 Partwise//EN\" \"http://www.musicxml.org/dtds/partwise.dtd\">";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct VoiceLane {
+    staff: Option<u8>,
+    voice: String,
+}
+
+fn normalize_raw_musicxml_doctype(xml: String) -> String {
+    xml.replacen(MUSICXML_3_PARTWISE_DOCTYPE, MUSICXML_4_PARTWISE_DOCTYPE, 1)
+}
+
+fn default_voice_for_staff(staff: Option<u8>) -> &'static str {
+    match staff {
+        Some(2) => "2",
+        _ => "1",
+    }
+}
+
+fn effective_staff(note: &NotePlayed, grand_staff: bool) -> Option<u8> {
+    if grand_staff {
+        Some(note.staff.unwrap_or(1))
+    } else {
+        None
+    }
+}
+
+fn effective_voice(note: &NotePlayed, grand_staff: bool) -> String {
+    note.voice
+        .clone()
+        .unwrap_or_else(|| default_voice_for_staff(effective_staff(note, grand_staff)).to_string())
+}
+
+fn voice_lane_for_note(note: &NotePlayed, grand_staff: bool) -> VoiceLane {
+    VoiceLane {
+        staff: effective_staff(note, grand_staff),
+        voice: effective_voice(note, grand_staff),
+    }
+}
+
+fn note_belongs_to_lane(note: &NotePlayed, lane: &VoiceLane, grand_staff: bool) -> bool {
+    effective_staff(note, grand_staff) == lane.staff
+        && effective_voice(note, grand_staff) == lane.voice
+}
+
+fn parse_staff_number(staff: Option<&mx::Staff>) -> Option<u8> {
+    staff.map(|staff| (*staff.content).min(u32::from(u8::MAX)) as u8)
+}
+
+fn divs_to_ticks(divs: u32, current_divs_per_quarter: u32, ticks_per_sixteenth: u32) -> u32 {
+    if current_divs_per_quarter == 0 {
+        return divs.max(1);
+    }
+    let target_divs_per_quarter = divs_per_quarter(ticks_per_sixteenth);
+    let scaled = (u64::from(divs) * u64::from(target_divs_per_quarter)
+        + u64::from(current_divs_per_quarter) / 2)
+        / u64::from(current_divs_per_quarter);
+    (scaled as u32).max(1)
+}
+
+fn quarter_bpm_to_ms_per_tick(quarter_bpm: f64, ticks_per_sixteenth: u32) -> Option<u32> {
+    if !quarter_bpm.is_finite() || quarter_bpm <= 0.0 {
+        return None;
+    }
+    let quarter_ticks = divs_per_quarter(ticks_per_sixteenth) as f64;
+    Some(((60_000.0 / quarter_bpm) / quarter_ticks).round().max(1.0) as u32)
+}
+
+fn tempo_from_sound(sound: &mx::Sound, ticks_per_sixteenth: u32) -> Option<u32> {
+    quarter_bpm_to_ms_per_tick(sound.attributes.tempo.as_ref()?.0, ticks_per_sixteenth)
 }
 
 // --- Primitive conversions ---
@@ -748,32 +821,28 @@ fn ticks_per_measure(ts: &TimeSignature, ticks_per_sixteenth: u32) -> usize {
     (ticks_per_sixteenth * 16 * ts.numerator as u32 / ts.denominator as u32) as usize
 }
 
-/// Build notes for a single staff, filtering `notes_by_tick` by `staff_filter`.
-/// `staff_filter = None` includes all notes (single-staff instruments).
-/// `staff_filter = Some(n)` includes only notes with `staff == Some(n)` (or `None` treated as 1).
-fn build_staff_notes(
+/// Build notes for one independent `(staff, voice)` lane.
+fn build_voice_lane_notes(
     tick_start: usize,
     tick_count: usize,
     notes_by_tick: &[NotesStartingThisTick],
     ticks_per_sixteenth: u32,
-    staff_filter: Option<u8>,
-    voice: &str,
+    lane: &VoiceLane,
+    grand_staff: bool,
 ) -> Vec<mx::MeasureElement> {
     let dpq = divs_per_quarter(ticks_per_sixteenth);
     let tick_end = (tick_start + tick_count).min(notes_by_tick.len());
     let mut elements = vec![];
     let mut filled: u32 = 0;
+    let staff_num = if grand_staff { lane.staff } else { None };
 
     for tick_idx in tick_start..tick_end {
         let group = &notes_by_tick[tick_idx];
-        let filtered: Vec<&NotePlayed> = match staff_filter {
-            None => group.notes.iter().collect(),
-            Some(sf) => group
-                .notes
-                .iter()
-                .filter(|n| n.staff.unwrap_or(1) == sf)
-                .collect(),
-        };
+        let filtered: Vec<&NotePlayed> = group
+            .notes
+            .iter()
+            .filter(|note| note_belongs_to_lane(note, lane, grand_staff))
+            .collect();
 
         if filtered.is_empty() {
             continue;
@@ -781,7 +850,7 @@ fn build_staff_notes(
 
         let tick_divs = (tick_idx - tick_start) as u32;
         if tick_divs > filled {
-            for rest in fill_rests(tick_divs - filled, dpq, staff_filter, voice) {
+            for rest in fill_rests(tick_divs - filled, dpq, staff_num, &lane.voice) {
                 elements.push(mx::MeasureElement::Note(rest));
             }
             filled = tick_divs;
@@ -793,8 +862,8 @@ fn build_staff_notes(
                 note,
                 i > 0,
                 ticks_per_sixteenth,
-                staff_filter,
-                voice,
+                staff_num,
+                &lane.voice,
             )));
         }
         filled += first_dur;
@@ -802,7 +871,7 @@ fn build_staff_notes(
 
     let measure_total = tick_count as u32;
     if filled < measure_total {
-        for rest in fill_rests(measure_total - filled, dpq, staff_filter, voice) {
+        for rest in fill_rests(measure_total - filled, dpq, staff_num, &lane.voice) {
             elements.push(mx::MeasureElement::Note(rest));
         }
     }
@@ -818,45 +887,77 @@ fn build_measure_notes(
     ticks_per_sixteenth: u32,
     grand_staff: bool,
 ) -> Vec<mx::MeasureElement> {
-    if grand_staff {
-        let mut elements = build_staff_notes(
-            tick_start,
-            tick_count,
-            notes_by_tick,
-            ticks_per_sixteenth,
-            Some(1),
-            "1",
-        );
-        elements.push(mx::MeasureElement::Backup(mx::Backup {
-            attributes: (),
-            content: mx::BackupContents {
-                duration: mx::Duration {
-                    attributes: (),
-                    content: mxd::PositiveDivisions(tick_count as u32),
-                },
-                footnote: None,
-                level: None,
-            },
-        }));
-        elements.extend(build_staff_notes(
-            tick_start,
-            tick_count,
-            notes_by_tick,
-            ticks_per_sixteenth,
-            Some(2),
-            "2",
-        ));
-        elements
-    } else {
-        build_staff_notes(
-            tick_start,
-            tick_count,
-            notes_by_tick,
-            ticks_per_sixteenth,
-            None,
-            "1",
-        )
+    let tick_end = (tick_start + tick_count).min(notes_by_tick.len());
+    let mut lanes: Vec<VoiceLane> = Vec::new();
+
+    for tick_idx in tick_start..tick_end {
+        for note in &notes_by_tick[tick_idx].notes {
+            let lane = voice_lane_for_note(note, grand_staff);
+            if !lanes.contains(&lane) {
+                lanes.push(lane);
+            }
+        }
     }
+
+    if grand_staff {
+        if !lanes.iter().any(|lane| lane.staff == Some(1)) {
+            lanes.push(VoiceLane {
+                staff: Some(1),
+                voice: String::from("1"),
+            });
+        }
+        if !lanes.iter().any(|lane| lane.staff == Some(2)) {
+            lanes.push(VoiceLane {
+                staff: Some(2),
+                voice: String::from("2"),
+            });
+        }
+    } else if lanes.is_empty() {
+        lanes.push(VoiceLane {
+            staff: None,
+            voice: String::from("1"),
+        });
+    }
+
+    lanes.sort_by(|left, right| {
+        left.staff
+            .unwrap_or(1)
+            .cmp(&right.staff.unwrap_or(1))
+            .then_with(|| {
+                let left_num = left.voice.parse::<u32>().ok();
+                let right_num = right.voice.parse::<u32>().ok();
+                left_num
+                    .cmp(&right_num)
+                    .then_with(|| left.voice.cmp(&right.voice))
+            })
+    });
+
+    let mut elements = Vec::new();
+    for (idx, lane) in lanes.iter().enumerate() {
+        if idx > 0 {
+            elements.push(mx::MeasureElement::Backup(mx::Backup {
+                attributes: (),
+                content: mx::BackupContents {
+                    duration: mx::Duration {
+                        attributes: (),
+                        content: mxd::PositiveDivisions(tick_count as u32),
+                    },
+                    footnote: None,
+                    level: None,
+                },
+            }));
+        }
+        elements.extend(build_voice_lane_notes(
+            tick_start,
+            tick_count,
+            notes_by_tick,
+            ticks_per_sixteenth,
+            lane,
+            grand_staff,
+        ));
+    }
+
+    elements
 }
 
 fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
@@ -923,12 +1024,17 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
         }));
     } else {
         let mut tick_start = 0;
+        let mut last_key: Option<Key> = None;
+        let mut last_time_signature: Option<TimeSignature> = None;
         for (i, measure) in comp.measures.iter().enumerate() {
             let tick_count =
                 ticks_per_measure(&measure.time_signature, comp.ticks_per_sixteenth_note);
             let mut measure_content = vec![];
-            if i == 0 {
-                let attrs = make_measure_attrs(comp.key, &measure.time_signature, instr, dpq);
+            if i == 0
+                || last_key != Some(measure.key)
+                || last_time_signature != Some(measure.time_signature)
+            {
+                let attrs = make_measure_attrs(measure.key, &measure.time_signature, instr, dpq);
                 measure_content.push(mx::MeasureElement::Attributes(attrs));
             }
             if let Some(ref chord) = measure.chord {
@@ -953,6 +1059,8 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
                 content: measure_content,
             }));
             tick_start += tick_count;
+            last_key = Some(measure.key);
+            last_time_signature = Some(measure.time_signature);
         }
     }
 
@@ -1020,12 +1128,12 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
     }
 
     let ticks_per_sixteenth = (dpq / 4).max(1);
-    // At 120 BPM: 500 ms per quarter note / dpq divisions per quarter = ms per division (= tick)
-    let ms_per_tick = (500 / dpq).max(1);
+    // Default to 120 quarter-notes per minute until a MusicXML <sound tempo="..."> overrides it.
+    let default_ms_per_tick = quarter_bpm_to_ms_per_tick(120.0, ticks_per_sixteenth).unwrap_or(1);
 
     let mut comp = Composition::new(
         ticks_per_sixteenth,
-        ms_per_tick,
+        default_ms_per_tick,
         key,
         Temperament::Even,
         vec![],
@@ -1033,17 +1141,23 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
 
     // Extract notes and measures from all parts
     for (part_idx, part) in score.content.part.iter().enumerate() {
-        let mut current_tick: usize = 0;
+        let mut measure_start_tick: usize = 0;
         let mut current_key = key;
         let mut current_ts = ts;
+        let mut current_ms_per_tick = default_ms_per_tick;
+        let mut current_divs_per_quarter = dpq;
 
         for elem in &part.content {
             if let mx::PartElement::Measure(measure) = elem {
                 let mut measure_chord: Option<Chord> = None;
+                let mut measure_position_divs: u32 = 0;
 
                 for mel in &measure.content {
                     match mel {
                         mx::MeasureElement::Attributes(attrs) => {
+                            if let Some(d) = &attrs.content.divisions {
+                                current_divs_per_quarter = *d.content;
+                            }
                             if let Some(key_el) = attrs.content.key.first() {
                                 if let mx::KeyContents::Explicit(exp) = &key_el.content {
                                     let fifths = *exp.fifths.content;
@@ -1067,12 +1181,49 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                 }
                             }
                         }
+                        mx::MeasureElement::Direction(direction) => {
+                            if let Some(sound) = &direction.content.sound {
+                                if let Some(ms_per_tick) =
+                                    tempo_from_sound(sound, ticks_per_sixteenth)
+                                {
+                                    current_ms_per_tick = ms_per_tick;
+                                }
+                            }
+                        }
+                        mx::MeasureElement::Sound(sound) => {
+                            if let Some(ms_per_tick) = tempo_from_sound(sound, ticks_per_sixteenth)
+                            {
+                                current_ms_per_tick = ms_per_tick;
+                            }
+                        }
                         mx::MeasureElement::Harmony(h) => {
                             measure_chord = harmony_to_chord(h);
                         }
+                        mx::MeasureElement::Backup(backup) => {
+                            let backup_ticks = divs_to_ticks(
+                                *backup.content.duration.content,
+                                current_divs_per_quarter,
+                                ticks_per_sixteenth,
+                            );
+                            measure_position_divs =
+                                measure_position_divs.saturating_sub(backup_ticks);
+                        }
+                        mx::MeasureElement::Forward(forward) => {
+                            let forward_ticks = divs_to_ticks(
+                                *forward.content.duration.content,
+                                current_divs_per_quarter,
+                                ticks_per_sixteenth,
+                            );
+                            measure_position_divs =
+                                measure_position_divs.saturating_add(forward_ticks);
+                        }
                         mx::MeasureElement::Note(note) => {
                             if let mx::NoteType::Normal(info) = &note.content.info {
-                                let dur_divs = *info.duration.content as usize;
+                                let dur_ticks = divs_to_ticks(
+                                    *info.duration.content,
+                                    current_divs_per_quarter,
+                                    ticks_per_sixteenth,
+                                );
                                 let is_chord = info.chord.is_some();
 
                                 match &info.audible {
@@ -1113,16 +1264,17 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                                             NoteDurationClass::ThirtySecondDotted,
                                                         )
                                                     }
-                                                    _ => NoteDuration::Ticks(dur_divs as u32),
+                                                    _ => NoteDuration::Ticks(dur_ticks),
                                                 }
                                             } else {
                                                 NoteDuration::Traditional(class)
                                             }
                                         } else {
-                                            NoteDuration::Ticks(dur_divs as u32)
+                                            NoteDuration::Ticks(dur_ticks)
                                         };
 
-                                        let tick = current_tick;
+                                        let tick =
+                                            measure_start_tick + measure_position_divs as usize;
                                         while comp.notes_by_tick.len() <= tick {
                                             comp.notes_by_tick.push(NotesStartingThisTick::empty());
                                         }
@@ -1130,16 +1282,23 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                             note: Note::new(letter, sf, octave),
                                             duration,
                                             amplitude: 0.8,
-                                            staff: None,
+                                            staff: parse_staff_number(note.content.staff.as_ref()),
+                                            voice: note
+                                                .content
+                                                .voice
+                                                .as_ref()
+                                                .map(|v| v.content.clone()),
                                         });
 
                                         if !is_chord {
-                                            current_tick += dur_divs;
+                                            measure_position_divs =
+                                                measure_position_divs.saturating_add(dur_ticks);
                                         }
                                     }
                                     mx::AudibleType::Rest(_) => {
                                         if !is_chord {
-                                            current_tick += dur_divs;
+                                            measure_position_divs =
+                                                measure_position_divs.saturating_add(dur_ticks);
                                         }
                                     }
                                     mx::AudibleType::Unpitched(_) => {}
@@ -1151,11 +1310,22 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                 }
 
                 if part_idx == 0 {
-                    comp.measures
-                        .push(Measure::new(current_key, current_ts, measure_chord, 120));
+                    comp.measures.push(Measure::new(
+                        current_key,
+                        current_ts,
+                        measure_chord,
+                        current_ms_per_tick,
+                    ));
                 }
+
+                measure_start_tick += ticks_per_measure(&current_ts, ticks_per_sixteenth);
             }
         }
+    }
+
+    if let Some(first_measure) = comp.measures.first() {
+        comp.ms_per_tick = first_measure.tempo;
+        comp.key = first_measure.key;
     }
 
     comp
@@ -1164,13 +1334,22 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
 // --- Public API ---
 
 pub fn write_musicxml(comp: &Composition, format: MusicXmlFormat, path: &Path) -> io::Result<()> {
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "non-UTF-8 path"))?;
     let score = composition_to_score(comp);
-    let compressed = format == MusicXmlFormat::Compressed;
-    musicxml::write_partwise_score(path_str, &score, compressed, false)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    match format {
+        MusicXmlFormat::Raw => {
+            let raw = musicxml::write_partwise_score_data(&score, false, false)
+                .map_err(io::Error::other)?;
+            let xml = String::from_utf8(raw)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            fs::write(path, normalize_raw_musicxml_doctype(xml))
+        }
+        MusicXmlFormat::Compressed => {
+            let path_str = path
+                .to_str()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "non-UTF-8 path"))?;
+            musicxml::write_partwise_score(path_str, &score, true, false).map_err(io::Error::other)
+        }
+    }
 }
 
 pub fn read_musicxml(path: &Path) -> io::Result<Composition> {
@@ -1180,4 +1359,181 @@ pub fn read_musicxml(path: &Path) -> io::Result<Composition> {
     let score = musicxml::read_score_partwise(path_str)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     Ok(score_to_composition(&score))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        composition::NotesStartingThisTick,
+        instrument::Instrument,
+        note::{Note, NoteDuration},
+    };
+
+    fn test_key() -> Key {
+        Key::new(NoteLetter::C, SharpFlat::Natural, MajorMinor::Major)
+    }
+
+    #[test]
+    fn musicxml_reader_honors_backup_forward_staff_voice_and_tempo() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="4.0">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>4</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <staves>2</staves>
+      </attributes>
+      <sound tempo="90"/>
+      <note>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>4</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <backup><duration>4</duration></backup>
+      <note>
+        <rest/>
+        <duration>2</duration>
+        <voice>2</voice>
+        <type>eighth</type>
+        <staff>1</staff>
+      </note>
+      <forward><duration>2</duration></forward>
+      <backup><duration>4</duration></backup>
+      <note>
+        <pitch><step>C</step><octave>3</octave></pitch>
+        <duration>4</duration>
+        <voice>5</voice>
+        <type>quarter</type>
+        <staff>2</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>"#;
+
+        let score = musicxml::read_score_data_partwise(xml.as_bytes().to_vec()).unwrap();
+        let composition = score_to_composition(&score);
+
+        assert_eq!(composition.ticks_per_sixteenth_note, 1);
+        assert_eq!(composition.ms_per_tick, 167);
+        assert_eq!(composition.measures.len(), 1);
+        assert_eq!(composition.measures[0].tempo, 167);
+        assert_eq!(composition.notes_by_tick.len(), 1);
+        assert_eq!(composition.notes_by_tick[0].notes.len(), 2);
+
+        let treble = composition.notes_by_tick[0]
+            .notes
+            .iter()
+            .find(|note| note.staff == Some(1))
+            .unwrap();
+        assert_eq!(treble.note.octave, 5);
+        assert_eq!(treble.voice.as_deref(), Some("1"));
+        assert_eq!(
+            treble.duration,
+            NoteDuration::Traditional(NoteDurationClass::Quarter)
+        );
+
+        let bass = composition.notes_by_tick[0]
+            .notes
+            .iter()
+            .find(|note| note.staff == Some(2))
+            .unwrap();
+        assert_eq!(bass.note.octave, 3);
+        assert_eq!(bass.voice.as_deref(), Some("5"));
+        assert_eq!(
+            bass.duration,
+            NoteDuration::Traditional(NoteDurationClass::Quarter)
+        );
+    }
+
+    #[test]
+    fn musicxml_writer_keeps_same_staff_voices_separate() {
+        let key = test_key();
+        let mut composition =
+            Composition::new(1, 100, key, Temperament::Even, vec![Instrument::Piano]);
+        composition
+            .measures
+            .push(Measure::new(key, TimeSignature::new(4, 4), None, 100));
+        composition.notes_by_tick.push(NotesStartingThisTick {
+            notes: vec![
+                NotePlayed {
+                    note: Note::new(NoteLetter::C, Some(SharpFlat::Natural), 5),
+                    duration: NoteDuration::Traditional(NoteDurationClass::Quarter),
+                    amplitude: 0.8,
+                    staff: Some(1),
+                    voice: Some(String::from("1")),
+                },
+                NotePlayed {
+                    note: Note::new(NoteLetter::G, Some(SharpFlat::Natural), 4),
+                    duration: NoteDuration::Traditional(NoteDurationClass::Half),
+                    amplitude: 0.8,
+                    staff: Some(1),
+                    voice: Some(String::from("2")),
+                },
+                NotePlayed {
+                    note: Note::new(NoteLetter::C, Some(SharpFlat::Natural), 3),
+                    duration: NoteDuration::Traditional(NoteDurationClass::Half),
+                    amplitude: 0.8,
+                    staff: Some(2),
+                    voice: Some(String::from("5")),
+                },
+            ],
+        });
+
+        let score = composition_to_score(&composition);
+        let mx::PartElement::Measure(measure) = &score.content.part[0].content[0] else {
+            panic!("expected first part element to be a measure");
+        };
+
+        let backup_count = measure
+            .content
+            .iter()
+            .filter(|element| matches!(element, mx::MeasureElement::Backup(_)))
+            .count();
+        assert_eq!(backup_count, 2);
+
+        let mut pitched_voices = Vec::new();
+        for element in &measure.content {
+            if let mx::MeasureElement::Note(note) = element {
+                if let mx::NoteType::Normal(info) = &note.content.info {
+                    if matches!(info.audible, mx::AudibleType::Pitch(_)) {
+                        assert!(info.chord.is_none());
+                        pitched_voices.push((
+                            parse_staff_number(note.content.staff.as_ref()),
+                            note.content
+                                .voice
+                                .as_ref()
+                                .map(|voice| voice.content.clone()),
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(pitched_voices.contains(&(Some(1), Some(String::from("1")))));
+        assert!(pitched_voices.contains(&(Some(1), Some(String::from("2")))));
+        assert!(pitched_voices.contains(&(Some(2), Some(String::from("5")))));
+    }
+
+    #[test]
+    fn raw_musicxml_doctype_is_upgraded_to_4_0() {
+        let key = test_key();
+        let composition = Composition::new(1, 100, key, Temperament::Even, vec![Instrument::Piano]);
+        let score = composition_to_score(&composition);
+        let raw = musicxml::write_partwise_score_data(&score, false, false).unwrap();
+        let normalized = normalize_raw_musicxml_doctype(String::from_utf8(raw).unwrap());
+
+        assert!(normalized.contains(MUSICXML_4_PARTWISE_DOCTYPE));
+        assert!(!normalized.contains(MUSICXML_3_PARTWISE_DOCTYPE));
+    }
 }

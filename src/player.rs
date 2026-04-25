@@ -1,8 +1,8 @@
 //! For playing music.
 
-use std::{f32::consts::PI, io};
+use std::{f32::consts::PI, io, num::NonZero};
 
-use rodio::{OutputStream, Sink, buffer::SamplesBuffer};
+use rodio::{DeviceSinkBuilder, Player, buffer::SamplesBuffer, nz};
 
 use crate::composition::Composition;
 
@@ -77,14 +77,18 @@ pub fn play(composition: &Composition) -> io::Result<()> {
         buf.iter_mut().for_each(|s| *s /= peak);
     }
 
-    let (_stream, handle) =
-        OutputStream::try_default().map_err(|e| io::Error::other(e.to_string()))?;
+    let mut device_sink =
+        DeviceSinkBuilder::open_default_sink().map_err(|e| io::Error::other(e.to_string()))?;
+    device_sink.log_on_drop(false);
 
-    let sink = Sink::try_new(&handle).map_err(|e| io::Error::other(e.to_string()))?;
+    let player = Player::connect_new(device_sink.mixer());
 
-    sink.append(SamplesBuffer::new(1, SAMPLE_RATE, buf));
+    let sample_rate = NonZero::new(SAMPLE_RATE).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "sample rate must be non-zero")
+    })?;
+    player.append(SamplesBuffer::new(nz!(1), sample_rate, buf));
 
-    sink.sleep_until_end();
+    player.sleep_until_end();
 
     Ok(())
 }

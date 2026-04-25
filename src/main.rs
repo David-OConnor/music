@@ -1,11 +1,13 @@
 use std::path::Path;
 
 use chord::{Chord, ChordQuality::*};
+use egui::Ui;
 use key_scale::{Key, MajorMinor, SharpFlat};
 
 use crate::{
     chord::{Inversion, prog_1451, prog_1564, prog_1645, prog_pachabel},
     composition::{Composition, NotesStartingThisTick},
+    gui::{WINDOW_HEIGHT, WINDOW_WIDTH},
     instrument::Instrument,
     make_bass_music::make_bassline_random,
     measure::{Measure, TimeSignature},
@@ -19,6 +21,7 @@ mod composition;
 mod composition_arch;
 mod decomposition;
 mod generation;
+mod gui;
 mod instrument;
 mod key_scale;
 mod make_bass_music;
@@ -37,8 +40,15 @@ mod player;
 //     pub duration: f32,
 // }
 
+#[derive(Default)]
 pub struct State {
     pub compositions: Vec<Composition>,
+}
+
+impl eframe::App for State {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        gui::draw(self, ui.ctx());
+    }
 }
 
 /// We are using this to develop our data structures.
@@ -76,6 +86,7 @@ pub fn make_test_composition() -> Composition {
         duration: ei,
         amplitude,
         staff: None,
+        voice: None,
     };
 
     let new_q = |letter: NoteLetter, octave: u8| NotePlayed {
@@ -83,6 +94,7 @@ pub fn make_test_composition() -> Composition {
         duration: qu,
         amplitude,
         staff: None,
+        voice: None,
     };
 
     let new_q_dot = |letter: NoteLetter, octave: u8| NotePlayed {
@@ -90,6 +102,7 @@ pub fn make_test_composition() -> Composition {
         duration: NoteDuration::Traditional(QuarterDotted),
         amplitude,
         staff: None,
+        voice: None,
     };
 
     let new_h = |letter: NoteLetter, octave: u8| NotePlayed {
@@ -97,6 +110,7 @@ pub fn make_test_composition() -> Composition {
         duration: ha,
         amplitude,
         staff: None,
+        voice: None,
     };
 
     // todo: How do we assign an instrument?
@@ -321,6 +335,7 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
                 duration: half_dur,
                 amplitude,
                 staff: Some(1),
+                voice: None,
             })
             .collect();
 
@@ -370,9 +385,46 @@ fn main() {
     // let comp = make_test_composition();
     // let comp = make_test_bassline();
 
-    let test_path = Path::new("./sheet_music.musicxml");
+    let xml_path = Path::new("./demo.musicxml");
+    let midi_path = Path::new("./demo.mid");
 
-    music_xml::write_musicxml(&comp, MusicXmlFormat::Raw, &test_path).unwrap();
+    comp.save_musicxml(MusicXmlFormat::Raw, &xml_path).unwrap();
+    comp.save_midi(&midi_path).unwrap();
 
-    comp.play().unwrap();
+    let comp_loaded = Composition::load_musicxml(
+        Path::new("C:/Users/the_a/compositions/training_etc/alicia-clair-obscur-expedition-33-main-theme-piano-solo.mxl")
+    ).unwrap();
+    comp_loaded
+        .save_midi(Path::new("./comp_loaded.mid"))
+        .unwrap();
+    comp_loaded
+        .save_musicxml(MusicXmlFormat::Raw, Path::new("./comp_loaded.musicxml"))
+        .unwrap();
+
+    println!("\nComp: {comp_loaded}");
+
+    for (i, note) in comp_loaded.notes_by_tick.iter().enumerate() {
+        if !i.is_multiple_of(comp_loaded.ticks_per_sixteenth_note as usize * 2) {
+            continue; //
+        }
+        println!(" -Tick {i}: {note}");
+    }
+
+    // comp_loaded.play().unwrap();
+    // comp.play().unwrap();
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([WINDOW_WIDTH, WINDOW_HEIGHT]),
+        ..Default::default()
+    };
+
+    let state = {
+        let mut v = State::default();
+
+        v.compositions.push(comp_loaded);
+
+        v
+    };
+
+    eframe::run_native("Music", options, Box::new(|_cc| Ok(Box::new(state)))).unwrap();
 }
