@@ -73,6 +73,47 @@ impl NoteEngraving {
             Self::Other(v) => v,
         }
     }
+
+    /// Convert to integer tick count where `divisions` ticks = one quarter note.
+    pub fn to_duration_ticks(self, divisions: u16) -> u16 {
+        let d = divisions as u32;
+        let ticks = match self {
+            Self::Whole => d * 4,
+            Self::Half => d * 2,
+            Self::HalfDotted => d * 3,
+            Self::Quarter => d,
+            Self::QuarterDotted => d * 3 / 2,
+            Self::Eighth => d / 2,
+            Self::EithDotted => d * 3 / 4,
+            Self::Sixteenth => d / 4,
+            Self::SixteenthDotted => d * 3 / 8,
+            Self::ThirtySecond => d / 8,
+            Self::ThirtySecondDotted => d * 3 / 16,
+            Self::SixtyFourth => d / 16,
+            Self::OneTwentyEighth => d / 32,
+            Self::Other(_) => d,
+        };
+        ticks.max(1) as u16
+    }
+
+    /// Best-fit engraving for a tick count with the given divisions per quarter.
+    pub fn from_duration_ticks(ticks: u16, divisions: u16) -> Self {
+        let d = divisions as u32;
+        let t = ticks as u32;
+        if t == d * 4 { Self::Whole }
+        else if t == d * 3 { Self::HalfDotted }
+        else if t == d * 2 { Self::Half }
+        else if d >= 2 && t == d * 3 / 2 { Self::QuarterDotted }
+        else if t == d { Self::Quarter }
+        else if d >= 4 && t == d * 3 / 4 { Self::EithDotted }
+        else if d >= 2 && t == d / 2 { Self::Eighth }
+        else if d >= 4 && t == d * 3 / 8 { Self::SixteenthDotted }
+        else if d >= 4 && t == d / 4 { Self::Sixteenth }
+        else if d >= 8 && t == d / 8 { Self::ThirtySecond }
+        else if d >= 16 && t == d / 16 { Self::SixtyFourth }
+        else if d >= 32 && t == d / 32 { Self::OneTwentyEighth }
+        else { Self::Quarter }
+    }
 }
 
 /// All integer times are in ms. All frequencies are in Hz.
@@ -343,7 +384,7 @@ impl NotePlayed {
 
 #[cfg(test)]
 mod tests {
-    use super::{Note, NoteDurationGeneral, NoteEngraving, NoteLetter, NotePlayed};
+    use super::{Note, NoteEngraving, NoteLetter, NotePlayed};
     use crate::{
         key_scale::{Key, MajorMinor, SharpFlat},
         overtones::Temperament,
@@ -352,8 +393,8 @@ mod tests {
     fn note(letter: NoteLetter, sharp_flat: Option<SharpFlat>, octave: u8) -> NotePlayed {
         NotePlayed {
             note: Note::new(letter, sharp_flat, octave),
-            // duration: NoteDurationGeneral::Traditional(NoteDuration::Quarter),
             engraving: NoteEngraving::Quarter,
+            duration: 4,
             amplitude: 1.0,
             staff: None,
             voice: 0,

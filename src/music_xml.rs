@@ -1,10 +1,6 @@
 //! Create Music XML from compositions, and vice versa.
 //! Supports raw .musicxml and compressed .mxl formats.
 //!
-//! We may use either the `musicxml` crate, or do this directly using an XML library.
-//! We will start with the library, but if it becomes easier/simpler to write and read XML directly,
-//! we will do that.
-//!
 //! MusicXML standard: https://w3c-cg.github.io/musicxml/
 
 use std::{fs, io, path::Path};
@@ -13,11 +9,11 @@ use musicxml::{datatypes as mxd, elements as mx};
 
 use crate::{
     chord::{Chord, ChordQuality, Inversion},
-    composition::{Composition, NotesStartingThisTick},
+    composition::Composition,
     instrument::Instrument,
     key_scale::{Key, MajorMinor, SharpFlat},
-    measure::{Measure, TimeSignature},
-    note::{Note, NoteDurationGeneral, NoteEngraving, NoteLetter, NotePlayed},
+    measure::{Measure, Staff, TimeSignature},
+    note::{Note, NoteEngraving, NoteLetter, NotePlayed},
     overtones::Temperament,
 };
 
@@ -46,74 +42,8 @@ impl MusicXmlFormat {
 const MUSICXML_3_PARTWISE_DOCTYPE: &str = "<!DOCTYPE score-partwise PUBLIC \"-//Recordare//DTD MusicXML 3.0 Partwise//EN\" \"http://www.musicxml.org/dtds/partwise.dtd\">";
 const MUSICXML_4_PARTWISE_DOCTYPE: &str = "<!DOCTYPE score-partwise PUBLIC \"-//Recordare//DTD MusicXML 4.0 Partwise//EN\" \"http://www.musicxml.org/dtds/partwise.dtd\">";
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct VoiceLane {
-    staff: Option<u8>,
-    voice: String,
-}
-
 fn normalize_raw_musicxml_doctype(xml: String) -> String {
     xml.replacen(MUSICXML_3_PARTWISE_DOCTYPE, MUSICXML_4_PARTWISE_DOCTYPE, 1)
-}
-
-fn default_voice_for_staff(staff: Option<u8>) -> &'static str {
-    match staff {
-        Some(2) => "2",
-        _ => "1",
-    }
-}
-
-fn effective_staff(note: &NotePlayed, grand_staff: bool) -> Option<u8> {
-    if grand_staff {
-        Some(note.staff.unwrap_or(1))
-    } else {
-        None
-    }
-}
-
-fn effective_voice(note: &NotePlayed, grand_staff: bool) -> String {
-    note.voice
-        .clone()
-        .unwrap_or_else(|| default_voice_for_staff(effective_staff(note, grand_staff)).to_string())
-}
-
-fn voice_lane_for_note(note: &NotePlayed, grand_staff: bool) -> VoiceLane {
-    VoiceLane {
-        staff: effective_staff(note, grand_staff),
-        voice: effective_voice(note, grand_staff),
-    }
-}
-
-fn note_belongs_to_lane(note: &NotePlayed, lane: &VoiceLane, grand_staff: bool) -> bool {
-    effective_staff(note, grand_staff) == lane.staff
-        && effective_voice(note, grand_staff) == lane.voice
-}
-
-fn parse_staff_number(staff: Option<&mx::Staff>) -> Option<u8> {
-    staff.map(|staff| (*staff.content).min(u32::from(u8::MAX)) as u8)
-}
-
-fn divs_to_ticks(divs: u32, current_divs_per_quarter: u32, ticks_per_sixteenth: u32) -> u32 {
-    if current_divs_per_quarter == 0 {
-        return divs.max(1);
-    }
-    let target_divs_per_quarter = divs_per_quarter(ticks_per_sixteenth);
-    let scaled = (u64::from(divs) * u64::from(target_divs_per_quarter)
-        + u64::from(current_divs_per_quarter) / 2)
-        / u64::from(current_divs_per_quarter);
-    (scaled as u32).max(1)
-}
-
-fn quarter_bpm_to_ms_per_tick(quarter_bpm: f64, ticks_per_sixteenth: u32) -> Option<u32> {
-    if !quarter_bpm.is_finite() || quarter_bpm <= 0.0 {
-        return None;
-    }
-    let quarter_ticks = divs_per_quarter(ticks_per_sixteenth) as f64;
-    Some(((60_000.0 / quarter_bpm) / quarter_ticks).round().max(1.0) as u32)
-}
-
-fn tempo_from_sound(sound: &mx::Sound, ticks_per_sixteenth: u32) -> Option<u32> {
-    quarter_bpm_to_ms_per_tick(sound.attributes.tempo.as_ref()?.0, ticks_per_sixteenth)
 }
 
 // --- Primitive conversions ---
@@ -169,7 +99,6 @@ fn alter_to_sharp_flat(alter: Option<&mx::Alter>) -> Option<SharpFlat> {
     })
 }
 
-/// Counts the circle-of-fifths position for a key (positive = sharps, negative = flats).
 fn key_to_fifths(key: Key) -> i8 {
     let ks = key.get_sharps_flats();
     let accidentals = [ks.f, ks.c, ks.g, ks.d, ks.a, ks.e, ks.b];
@@ -267,6 +196,17 @@ fn is_dotted(class: NoteEngraving) -> bool {
     )
 }
 
+fn dot_engraving(base: NoteEngraving) -> NoteEngraving {
+    match base {
+        NoteEngraving::Half => NoteEngraving::HalfDotted,
+        NoteEngraving::Quarter => NoteEngraving::QuarterDotted,
+        NoteEngraving::Eighth => NoteEngraving::EithDotted,
+        NoteEngraving::Sixteenth => NoteEngraving::SixteenthDotted,
+        NoteEngraving::ThirtySecond => NoteEngraving::ThirtySecondDotted,
+        other => other,
+    }
+}
+
 fn instrument_clef(instr: Instrument) -> (mxd::ClefSign, i16) {
     match instr {
         Instrument::BassGuitar | Instrument::DoubleBass | Instrument::Cello => {
@@ -298,6 +238,10 @@ fn instrument_name(instr: Instrument) -> String {
         Instrument::Banjo => "Banjo",
     }
     .to_string()
+}
+
+fn parse_staff_number(staff: Option<&mx::Staff>) -> Option<usize> {
+    staff.map(|s| (*s.content).min(u32::from(u8::MAX)) as usize)
 }
 
 // --- Harmony / chord symbol conversions ---
@@ -466,49 +410,6 @@ fn harmony_to_chord(h: &mx::Harmony) -> Option<Chord> {
     ))
 }
 
-// --- Tick / division arithmetic ---
-
-/// MusicXML divisions per quarter note = 4 × ticks_per_sixteenth.
-/// This makes 1 tick = 1 MusicXML division, simplifying all conversions.
-fn divs_per_quarter(ticks_per_sixteenth: u32) -> u32 {
-    ticks_per_sixteenth * 4
-}
-
-/// Convert `NoteDuration` to MusicXML division count (1 tick = 1 division).
-fn note_dur_to_divs(dur: NoteDurationGeneral, ticks_per_sixteenth: u32) -> u32 {
-    dur.get_ticks(ticks_per_sixteenth)
-        .unwrap_or(ticks_per_sixteenth * 4)
-}
-
-/// Best-fit (NoteTypeValue, is_dotted) for a given division count.
-fn divs_to_note_type(divs: u32, dpq: u32) -> (mxd::NoteTypeValue, bool) {
-    if dpq == 0 {
-        return (mxd::NoteTypeValue::Quarter, false);
-    }
-    // Check exact matches from largest to smallest, including dotted values.
-    if divs == dpq * 4 {
-        (mxd::NoteTypeValue::Whole, false)
-    } else if divs == dpq * 3 {
-        (mxd::NoteTypeValue::Half, true)
-    } else if divs == dpq * 2 {
-        (mxd::NoteTypeValue::Half, false)
-    } else if dpq >= 2 && divs == dpq * 3 / 2 {
-        (mxd::NoteTypeValue::Quarter, true)
-    } else if divs == dpq {
-        (mxd::NoteTypeValue::Quarter, false)
-    } else if dpq >= 4 && divs == dpq * 3 / 4 {
-        (mxd::NoteTypeValue::Eighth, true)
-    } else if dpq >= 2 && divs == dpq / 2 {
-        (mxd::NoteTypeValue::Eighth, false)
-    } else if dpq >= 4 && divs == dpq / 4 {
-        (mxd::NoteTypeValue::Sixteenth, false)
-    } else if dpq >= 8 && divs == dpq / 8 {
-        (mxd::NoteTypeValue::ThirtySecond, false)
-    } else {
-        (mxd::NoteTypeValue::Quarter, false)
-    }
-}
-
 // --- Note builders ---
 
 fn make_rest(divs: u32, dpq: u32, staff_num: Option<u8>, voice: &str) -> mx::Note {
@@ -569,14 +470,39 @@ fn make_rest(divs: u32, dpq: u32, staff_num: Option<u8>, voice: &str) -> mx::Not
     }
 }
 
-/// Greedy fill: decompose `gap_divs` into a sequence of rest notes from largest to smallest.
+fn divs_to_note_type(divs: u32, dpq: u32) -> (mxd::NoteTypeValue, bool) {
+    if dpq == 0 {
+        return (mxd::NoteTypeValue::Quarter, false);
+    }
+    if divs == dpq * 4 {
+        (mxd::NoteTypeValue::Whole, false)
+    } else if divs == dpq * 3 {
+        (mxd::NoteTypeValue::Half, true)
+    } else if divs == dpq * 2 {
+        (mxd::NoteTypeValue::Half, false)
+    } else if dpq >= 2 && divs == dpq * 3 / 2 {
+        (mxd::NoteTypeValue::Quarter, true)
+    } else if divs == dpq {
+        (mxd::NoteTypeValue::Quarter, false)
+    } else if dpq >= 4 && divs == dpq * 3 / 4 {
+        (mxd::NoteTypeValue::Eighth, true)
+    } else if dpq >= 2 && divs == dpq / 2 {
+        (mxd::NoteTypeValue::Eighth, false)
+    } else if dpq >= 4 && divs == dpq / 4 {
+        (mxd::NoteTypeValue::Sixteenth, false)
+    } else if dpq >= 8 && divs == dpq / 8 {
+        (mxd::NoteTypeValue::ThirtySecond, false)
+    } else {
+        (mxd::NoteTypeValue::Quarter, false)
+    }
+}
+
 fn fill_rests(gap_divs: u32, dpq: u32, staff_num: Option<u8>, voice: &str) -> Vec<mx::Note> {
     if dpq == 0 || gap_divs == 0 {
         return vec![];
     }
     let mut remaining = gap_divs;
     let mut notes = vec![];
-    // Standard durations from whole down to 32nd, including dotted variants
     let dw = dpq * 4;
     let dhd = dpq * 3;
     let dh = dpq * 2;
@@ -603,21 +529,14 @@ fn fill_rests(gap_divs: u32, dpq: u32, staff_num: Option<u8>, voice: &str) -> Ve
 
 fn make_pitch_note(
     note: &NotePlayed,
-    is_chord: bool,
-    ticks_per_sixteenth: u32,
+    note_divs: u32,
     staff_num: Option<u8>,
     voice: &str,
 ) -> mx::Note {
-    let dpq = divs_per_quarter(ticks_per_sixteenth);
-    let divs = note_dur_to_divs(note.engraving, ticks_per_sixteenth);
-
-    let (type_val, dotted) = match note.engraving {
-        NoteDurationGeneral::Traditional(class) => {
-            (duration_class_to_type_value(class), is_dotted(class))
-        }
-        NoteDurationGeneral::Ticks(_) => divs_to_note_type(divs, dpq),
-    };
-
+    let (type_val, dotted) = (
+        duration_class_to_type_value(note.engraving),
+        is_dotted(note.engraving),
+    );
     let dot = if dotted {
         vec![mx::Dot {
             attributes: mx::DotAttributes::default(),
@@ -626,19 +545,11 @@ fn make_pitch_note(
     } else {
         vec![]
     };
-
     mx::Note {
         attributes: mx::NoteAttributes::default(),
         content: mx::NoteContents {
             info: mx::NoteType::Normal(mx::NormalInfo {
-                chord: if is_chord {
-                    Some(mx::Chord {
-                        attributes: (),
-                        content: (),
-                    })
-                } else {
-                    None
-                },
+                chord: None,
                 audible: mx::AudibleType::Pitch(mx::Pitch {
                     attributes: (),
                     content: mx::PitchContents {
@@ -655,7 +566,7 @@ fn make_pitch_note(
                 }),
                 duration: mx::Duration {
                     attributes: (),
-                    content: mxd::PositiveDivisions(divs),
+                    content: mxd::PositiveDivisions(note_divs),
                 },
                 tie: vec![],
             }),
@@ -689,7 +600,7 @@ fn make_pitch_note(
     }
 }
 
-// --- Measure / score builders ---
+// --- Attributes builder ---
 
 fn make_measure_attrs(key: Key, ts: &TimeSignature, instr: Instrument, dpq: u32) -> mx::Attributes {
     let grand = instrument_has_grand_staff(instr);
@@ -814,149 +725,7 @@ fn make_measure_attrs(key: Key, ts: &TimeSignature, instr: Instrument, dpq: u32)
     }
 }
 
-/// Total ticks (= MusicXML divisions) that a measure occupies.
-fn ticks_per_measure(ts: &TimeSignature, ticks_per_sixteenth: u32) -> usize {
-    (ticks_per_sixteenth * 16 * ts.numerator as u32 / ts.denominator as u32) as usize
-}
-
-/// Build notes for one independent `(staff, voice)` lane.
-fn build_voice_lane_notes(
-    tick_start: usize,
-    tick_count: usize,
-    notes_by_tick: &[NotesStartingThisTick],
-    ticks_per_sixteenth: u32,
-    lane: &VoiceLane,
-    grand_staff: bool,
-) -> Vec<mx::MeasureElement> {
-    let dpq = divs_per_quarter(ticks_per_sixteenth);
-    let tick_end = (tick_start + tick_count).min(notes_by_tick.len());
-    let mut elements = vec![];
-    let mut filled: u32 = 0;
-    let staff_num = if grand_staff { lane.staff } else { None };
-
-    for tick_idx in tick_start..tick_end {
-        let group = &notes_by_tick[tick_idx];
-        let filtered: Vec<&NotePlayed> = group
-            .notes
-            .iter()
-            .filter(|note| note_belongs_to_lane(note, lane, grand_staff))
-            .collect();
-
-        if filtered.is_empty() {
-            continue;
-        }
-
-        let tick_divs = (tick_idx - tick_start) as u32;
-        if tick_divs > filled {
-            for rest in fill_rests(tick_divs - filled, dpq, staff_num, &lane.voice) {
-                elements.push(mx::MeasureElement::Note(rest));
-            }
-            filled = tick_divs;
-        }
-
-        let first_dur = note_dur_to_divs(filtered[0].engraving, ticks_per_sixteenth);
-        for (i, note) in filtered.iter().enumerate() {
-            elements.push(mx::MeasureElement::Note(make_pitch_note(
-                note,
-                i > 0,
-                ticks_per_sixteenth,
-                staff_num,
-                &lane.voice,
-            )));
-        }
-        filled += first_dur;
-    }
-
-    let measure_total = tick_count as u32;
-    if filled < measure_total {
-        for rest in fill_rests(measure_total - filled, dpq, staff_num, &lane.voice) {
-            elements.push(mx::MeasureElement::Note(rest));
-        }
-    }
-
-    elements
-}
-
-/// Build the note elements for a measure slice of `notes_by_tick`.
-fn build_measure_notes(
-    tick_start: usize,
-    tick_count: usize,
-    notes_by_tick: &[NotesStartingThisTick],
-    ticks_per_sixteenth: u32,
-    grand_staff: bool,
-) -> Vec<mx::MeasureElement> {
-    let tick_end = (tick_start + tick_count).min(notes_by_tick.len());
-    let mut lanes: Vec<VoiceLane> = Vec::new();
-
-    for tick_idx in tick_start..tick_end {
-        for note in &notes_by_tick[tick_idx].notes {
-            let lane = voice_lane_for_note(note, grand_staff);
-            if !lanes.contains(&lane) {
-                lanes.push(lane);
-            }
-        }
-    }
-
-    if grand_staff {
-        if !lanes.iter().any(|lane| lane.staff == Some(1)) {
-            lanes.push(VoiceLane {
-                staff: Some(1),
-                voice: String::from("1"),
-            });
-        }
-        if !lanes.iter().any(|lane| lane.staff == Some(2)) {
-            lanes.push(VoiceLane {
-                staff: Some(2),
-                voice: String::from("2"),
-            });
-        }
-    } else if lanes.is_empty() {
-        lanes.push(VoiceLane {
-            staff: None,
-            voice: String::from("1"),
-        });
-    }
-
-    lanes.sort_by(|left, right| {
-        left.staff
-            .unwrap_or(1)
-            .cmp(&right.staff.unwrap_or(1))
-            .then_with(|| {
-                let left_num = left.voice.parse::<u32>().ok();
-                let right_num = right.voice.parse::<u32>().ok();
-                left_num
-                    .cmp(&right_num)
-                    .then_with(|| left.voice.cmp(&right.voice))
-            })
-    });
-
-    let mut elements = Vec::new();
-    for (idx, lane) in lanes.iter().enumerate() {
-        if idx > 0 {
-            elements.push(mx::MeasureElement::Backup(mx::Backup {
-                attributes: (),
-                content: mx::BackupContents {
-                    duration: mx::Duration {
-                        attributes: (),
-                        content: mxd::PositiveDivisions(tick_count as u32),
-                    },
-                    footnote: None,
-                    level: None,
-                },
-            }));
-        }
-        elements.extend(build_voice_lane_notes(
-            tick_start,
-            tick_count,
-            notes_by_tick,
-            ticks_per_sixteenth,
-            lane,
-            grand_staff,
-        ));
-    }
-
-    elements
-}
+// --- Score building ---
 
 fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
     let part_id = "P1";
@@ -965,7 +734,7 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
         .first()
         .copied()
         .unwrap_or(Instrument::Piano);
-    let dpq = divs_per_quarter(comp.ticks_per_sixteenth_note);
+    let grand = instrument_has_grand_staff(instr);
 
     let part_list = mx::PartList {
         attributes: (),
@@ -995,23 +764,111 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
     };
 
     let mut part_content: Vec<mx::PartElement> = vec![];
+    let mut last_key: Option<Key> = None;
+    let mut last_ts: Option<TimeSignature> = None;
+    let mut last_tempo: Option<u16> = None;
 
-    let grand = instrument_has_grand_staff(instr);
+    for (mi, measure) in comp.measures.iter().enumerate() {
+        let dpq = measure.divisions as u32;
+        let ts = measure.time_signature;
+        let mut measure_content: Vec<mx::MeasureElement> = vec![];
 
-    if comp.measures.is_empty() {
-        let ts = TimeSignature::new(4, 4);
-        let attrs = make_measure_attrs(comp.key, &ts, instr, dpq);
-        let mut measure_content = vec![mx::MeasureElement::Attributes(attrs)];
-        measure_content.extend(build_measure_notes(
-            0,
-            comp.notes_by_tick.len(),
-            &comp.notes_by_tick,
-            comp.ticks_per_sixteenth_note,
-            grand,
-        ));
+        if mi == 0 || last_key != Some(measure.key) || last_ts != Some(ts) {
+            measure_content.push(mx::MeasureElement::Attributes(make_measure_attrs(
+                measure.key,
+                &ts,
+                instr,
+                dpq,
+            )));
+        }
+        last_key = Some(measure.key);
+        last_ts = Some(ts);
+
+        if measure.tempo > 0 && Some(measure.tempo) != last_tempo {
+            measure_content.push(mx::MeasureElement::Sound(mx::Sound {
+                attributes: mx::SoundAttributes {
+                    tempo: Some(mxd::NonNegativeDecimal(f64::from(measure.tempo))),
+                    ..Default::default()
+                },
+                content: Default::default(),
+            }));
+            last_tempo = Some(measure.tempo);
+        }
+
+        if let Some(ref chord) = measure.chord {
+            measure_content.push(mx::MeasureElement::Harmony(chord_to_harmony(chord)));
+        }
+
+        // Total divisions in this measure (= ticks)
+        let measure_total_divs =
+            dpq * 4 * ts.numerator as u32 / ts.denominator as u32;
+
+        for (vi, voice_notes) in measure.notes.iter().enumerate() {
+            if vi > 0 {
+                measure_content.push(mx::MeasureElement::Backup(mx::Backup {
+                    attributes: (),
+                    content: mx::BackupContents {
+                        duration: mx::Duration {
+                            attributes: (),
+                            content: mxd::PositiveDivisions(measure_total_divs),
+                        },
+                        footnote: None,
+                        level: None,
+                    },
+                }));
+            }
+
+            let voice_label = format!("{}", vi + 1);
+            // Determine staff for this voice: use first note's staff, or auto-assign
+            let staff_num: Option<u8> = if grand {
+                voice_notes
+                    .first()
+                    .and_then(|n| n.staff)
+                    .map(|s| s as u8)
+                    .or(Some(vi as u8 + 1))
+            } else {
+                None
+            };
+
+            let mut filled: u32 = 0;
+            for note in voice_notes {
+                let note_divs = note.duration as u32;
+                if note.amplitude < f32::EPSILON {
+                    measure_content.push(mx::MeasureElement::Note(make_rest(
+                        note_divs,
+                        dpq,
+                        staff_num,
+                        &voice_label,
+                    )));
+                } else {
+                    measure_content.push(mx::MeasureElement::Note(make_pitch_note(
+                        note,
+                        note_divs,
+                        staff_num,
+                        &voice_label,
+                    )));
+                }
+                filled += note_divs;
+            }
+
+            if filled < measure_total_divs {
+                for rest in fill_rests(measure_total_divs - filled, dpq, staff_num, &voice_label) {
+                    measure_content.push(mx::MeasureElement::Note(rest));
+                }
+            }
+        }
+
+        // If no voices, emit a full-measure rest
+        if measure.notes.is_empty() {
+            let staff_num = if grand { Some(1u8) } else { None };
+            for rest in fill_rests(measure_total_divs, dpq, staff_num, "1") {
+                measure_content.push(mx::MeasureElement::Note(rest));
+            }
+        }
+
         part_content.push(mx::PartElement::Measure(mx::Measure {
             attributes: mx::MeasureAttributes {
-                number: mxd::Token("1".to_string()),
+                number: mxd::Token((mi + 1).to_string()),
                 id: None,
                 implicit: None,
                 non_controlling: None,
@@ -1020,46 +877,6 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
             },
             content: measure_content,
         }));
-    } else {
-        let mut tick_start = 0;
-        let mut last_key: Option<Key> = None;
-        let mut last_time_signature: Option<TimeSignature> = None;
-        for (i, measure) in comp.measures.iter().enumerate() {
-            let tick_count =
-                ticks_per_measure(&measure.time_signature, comp.ticks_per_sixteenth_note);
-            let mut measure_content = vec![];
-            if i == 0
-                || last_key != Some(measure.key)
-                || last_time_signature != Some(measure.time_signature)
-            {
-                let attrs = make_measure_attrs(measure.key, &measure.time_signature, instr, dpq);
-                measure_content.push(mx::MeasureElement::Attributes(attrs));
-            }
-            if let Some(ref chord) = measure.chord {
-                measure_content.push(mx::MeasureElement::Harmony(chord_to_harmony(chord)));
-            }
-            measure_content.extend(build_measure_notes(
-                tick_start,
-                tick_count,
-                &comp.notes_by_tick,
-                comp.ticks_per_sixteenth_note,
-                grand,
-            ));
-            part_content.push(mx::PartElement::Measure(mx::Measure {
-                attributes: mx::MeasureAttributes {
-                    number: mxd::Token((i + 1).to_string()),
-                    id: None,
-                    implicit: None,
-                    non_controlling: None,
-                    text: None,
-                    width: None,
-                },
-                content: measure_content,
-            }));
-            tick_start += tick_count;
-            last_key = Some(measure.key);
-            last_time_signature = Some(measure.time_signature);
-        }
     }
 
     mx::ScorePartwise {
@@ -1084,19 +901,40 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
     }
 }
 
-fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
-    let mut key = Key::new(NoteLetter::C, SharpFlat::Natural, MajorMinor::Major);
-    let mut ts = TimeSignature::new(4, 4);
-    let mut dpq = 4u32;
+fn extract_bpm_from_sound(sound: &mx::Sound) -> Option<u16> {
+    let bpm = sound.attributes.tempo.as_ref()?.0;
+    if bpm > 0.0 && bpm.is_finite() {
+        Some(bpm.round().clamp(1.0, f64::from(u16::MAX)) as u16)
+    } else {
+        None
+    }
+}
 
-    // Pull key, time sig, and divisions from the first measure's Attributes element
-    'find_attrs: for part in &score.content.part {
+fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
+    let mut comp = Composition::new(Temperament::Even, vec![]);
+
+    for (part_idx, part) in score.content.part.iter().enumerate() {
+        let mut current_key = Key::new(NoteLetter::C, SharpFlat::Natural, MajorMinor::Major);
+        let mut current_ts = TimeSignature::new(4, 4);
+        let mut current_tempo_bpm: u16 = 120;
+        let mut current_divs: u32 = 4;
+
         for elem in &part.content {
-            if let mx::PartElement::Measure(m) = elem {
-                for mel in &m.content {
-                    if let mx::MeasureElement::Attributes(attrs) = mel {
+            let mx::PartElement::Measure(mx_measure) = elem else {
+                continue;
+            };
+
+            // voice_order maintains insertion order; voice_data parallels it
+            let mut voice_order: Vec<String> = Vec::new();
+            let mut voice_data: Vec<Vec<NotePlayed>> = Vec::new();
+            let mut measure_chord: Option<Chord> = None;
+            let mut chord_count: usize = 0;
+
+            for mel in &mx_measure.content {
+                match mel {
+                    mx::MeasureElement::Attributes(attrs) => {
                         if let Some(d) = &attrs.content.divisions {
-                            dpq = *d.content;
+                            current_divs = *d.content;
                         }
                         if let Some(key_el) = attrs.content.key.first() {
                             if let mx::KeyContents::Explicit(exp) = &key_el.content {
@@ -1105,7 +943,7 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                     Some(m) if m.content == mxd::Mode::Minor => MajorMinor::Minor,
                                     _ => MajorMinor::Major,
                                 };
-                                key = fifths_mode_to_key(fifths, mode);
+                                current_key = fifths_mode_to_key(fifths, mode);
                             }
                         }
                         if let Some(time_el) = attrs.content.time.first() {
@@ -1114,216 +952,125 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                     tb.beats.content.parse::<u8>(),
                                     tb.beat_type.content.parse::<u8>(),
                                 ) {
-                                    ts = TimeSignature::new(num, den);
+                                    current_ts = TimeSignature::new(num, den);
                                 }
                             }
                         }
                     }
-                }
-                break 'find_attrs;
-            }
-        }
-    }
-
-    let ticks_per_sixteenth = (dpq / 4).max(1);
-    // Default to 120 quarter-notes per minute until a MusicXML <sound tempo="..."> overrides it.
-    let default_ms_per_tick = quarter_bpm_to_ms_per_tick(120.0, ticks_per_sixteenth).unwrap_or(1);
-
-    let mut comp = Composition::new(
-        ticks_per_sixteenth,
-        default_ms_per_tick,
-        key,
-        Temperament::Even,
-        vec![],
-    );
-
-    // Extract notes and measures from all parts
-    for (part_idx, part) in score.content.part.iter().enumerate() {
-        let mut measure_start_tick: usize = 0;
-        let mut current_key = key;
-        let mut current_ts = ts;
-        let mut current_ms_per_tick = default_ms_per_tick;
-        let mut current_divs_per_quarter = dpq;
-
-        for elem in &part.content {
-            if let mx::PartElement::Measure(measure) = elem {
-                let mut measure_chord: Option<Chord> = None;
-                let mut measure_position_divs: u32 = 0;
-
-                for mel in &measure.content {
-                    match mel {
-                        mx::MeasureElement::Attributes(attrs) => {
-                            if let Some(d) = &attrs.content.divisions {
-                                current_divs_per_quarter = *d.content;
-                            }
-                            if let Some(key_el) = attrs.content.key.first() {
-                                if let mx::KeyContents::Explicit(exp) = &key_el.content {
-                                    let fifths = *exp.fifths.content;
-                                    let mode = match &exp.mode {
-                                        Some(m) if m.content == mxd::Mode::Minor => {
-                                            MajorMinor::Minor
-                                        }
-                                        _ => MajorMinor::Major,
-                                    };
-                                    current_key = fifths_mode_to_key(fifths, mode);
-                                }
-                            }
-                            if let Some(time_el) = attrs.content.time.first() {
-                                if let Some(tb) = time_el.content.beats.first() {
-                                    if let (Ok(num), Ok(den)) = (
-                                        tb.beats.content.parse::<u8>(),
-                                        tb.beat_type.content.parse::<u8>(),
-                                    ) {
-                                        current_ts = TimeSignature::new(num, den);
-                                    }
-                                }
+                    mx::MeasureElement::Direction(dir) => {
+                        if let Some(sound) = &dir.content.sound {
+                            if let Some(bpm) = extract_bpm_from_sound(sound) {
+                                current_tempo_bpm = bpm;
                             }
                         }
-                        mx::MeasureElement::Direction(direction) => {
-                            if let Some(sound) = &direction.content.sound {
-                                if let Some(ms_per_tick) =
-                                    tempo_from_sound(sound, ticks_per_sixteenth)
+                    }
+                    mx::MeasureElement::Sound(sound) => {
+                        if let Some(bpm) = extract_bpm_from_sound(sound) {
+                            current_tempo_bpm = bpm;
+                        }
+                    }
+                    mx::MeasureElement::Harmony(h) => {
+                        measure_chord = harmony_to_chord(h);
+                    }
+                    mx::MeasureElement::Note(note) => {
+                        if let mx::NoteType::Normal(info) = &note.content.info {
+                            let is_chord = info.chord.is_some();
+                            let dur_raw = (*info.duration.content)
+                                .min(u32::from(u16::MAX)) as u16;
+
+                            let voice_str = if is_chord {
+                                // Each chord note gets its own auto-voice
+                                chord_count += 1;
+                                format!("__chord_{chord_count}")
+                            } else {
+                                note.content
+                                    .voice
+                                    .as_ref()
+                                    .map(|v| v.content.clone())
+                                    .unwrap_or_else(|| "1".to_string())
+                            };
+
+                            let voice_idx =
+                                if let Some(idx) = voice_order.iter().position(|v| v == &voice_str)
                                 {
-                                    current_ms_per_tick = ms_per_tick;
+                                    idx
+                                } else {
+                                    voice_order.push(voice_str.clone());
+                                    voice_data.push(Vec::new());
+                                    voice_order.len() - 1
+                                };
+
+                            let engraving = if let Some(type_el) = &note.content.r#type {
+                                let base = type_value_to_duration_class(&type_el.content);
+                                if !note.content.dot.is_empty() {
+                                    dot_engraving(base)
+                                } else {
+                                    base
                                 }
-                            }
-                        }
-                        mx::MeasureElement::Sound(sound) => {
-                            if let Some(ms_per_tick) = tempo_from_sound(sound, ticks_per_sixteenth)
-                            {
-                                current_ms_per_tick = ms_per_tick;
-                            }
-                        }
-                        mx::MeasureElement::Harmony(h) => {
-                            measure_chord = harmony_to_chord(h);
-                        }
-                        mx::MeasureElement::Backup(backup) => {
-                            let backup_ticks = divs_to_ticks(
-                                *backup.content.duration.content,
-                                current_divs_per_quarter,
-                                ticks_per_sixteenth,
-                            );
-                            measure_position_divs =
-                                measure_position_divs.saturating_sub(backup_ticks);
-                        }
-                        mx::MeasureElement::Forward(forward) => {
-                            let forward_ticks = divs_to_ticks(
-                                *forward.content.duration.content,
-                                current_divs_per_quarter,
-                                ticks_per_sixteenth,
-                            );
-                            measure_position_divs =
-                                measure_position_divs.saturating_add(forward_ticks);
-                        }
-                        mx::MeasureElement::Note(note) => {
-                            if let mx::NoteType::Normal(info) = &note.content.info {
-                                let dur_ticks = divs_to_ticks(
-                                    *info.duration.content,
-                                    current_divs_per_quarter,
-                                    ticks_per_sixteenth,
-                                );
-                                let is_chord = info.chord.is_some();
+                            } else {
+                                NoteEngraving::from_duration_ticks(
+                                    dur_raw,
+                                    current_divs.min(u32::from(u16::MAX)) as u16,
+                                )
+                            };
 
-                                match &info.audible {
-                                    mx::AudibleType::Pitch(pitch) => {
-                                        let letter =
-                                            step_to_note_letter(&pitch.content.step.content);
-                                        let octave = *pitch.content.octave.content;
-                                        let sf = alter_to_sharp_flat(pitch.content.alter.as_ref());
+                            let staff =
+                                parse_staff_number(note.content.staff.as_ref());
 
-                                        let duration = if let Some(type_el) = &note.content.r#type {
-                                            let class =
-                                                type_value_to_duration_class(&type_el.content);
-                                            let has_dot = !note.content.dot.is_empty();
-                                            if has_dot {
-                                                match class {
-                                                    NoteEngraving::Half => {
-                                                        NoteDurationGeneral::Traditional(
-                                                            NoteEngraving::HalfDotted,
-                                                        )
-                                                    }
-                                                    NoteEngraving::Quarter => {
-                                                        NoteDurationGeneral::Traditional(
-                                                            NoteEngraving::QuarterDotted,
-                                                        )
-                                                    }
-                                                    NoteEngraving::Eighth => {
-                                                        NoteDurationGeneral::Traditional(
-                                                            NoteEngraving::EithDotted,
-                                                        )
-                                                    }
-                                                    NoteEngraving::Sixteenth => {
-                                                        NoteDurationGeneral::Traditional(
-                                                            NoteEngraving::SixteenthDotted,
-                                                        )
-                                                    }
-                                                    NoteEngraving::ThirtySecond => {
-                                                        NoteDurationGeneral::Traditional(
-                                                            NoteEngraving::ThirtySecondDotted,
-                                                        )
-                                                    }
-                                                    _ => NoteDurationGeneral::Ticks(dur_ticks),
-                                                }
-                                            } else {
-                                                NoteDurationGeneral::Traditional(class)
-                                            }
-                                        } else {
-                                            NoteDurationGeneral::Ticks(dur_ticks)
-                                        };
-
-                                        let tick =
-                                            measure_start_tick + measure_position_divs as usize;
-                                        while comp.notes_by_tick.len() <= tick {
-                                            comp.notes_by_tick.push(NotesStartingThisTick::empty());
-                                        }
-                                        comp.notes_by_tick[tick].notes.push(NotePlayed {
-                                            note: Note::new(letter, sf, octave),
-                                            engraving: duration,
-                                            amplitude: 0.8,
-                                            staff: parse_staff_number(note.content.staff.as_ref()),
-                                            voice: note
-                                                .content
-                                                .voice
-                                                .as_ref()
-                                                .map(|v| v.content.clone()),
-                                        });
-
-                                        if !is_chord {
-                                            measure_position_divs =
-                                                measure_position_divs.saturating_add(dur_ticks);
-                                        }
-                                    }
-                                    mx::AudibleType::Rest(_) => {
-                                        if !is_chord {
-                                            measure_position_divs =
-                                                measure_position_divs.saturating_add(dur_ticks);
-                                        }
-                                    }
-                                    mx::AudibleType::Unpitched(_) => {}
+                            match &info.audible {
+                                mx::AudibleType::Pitch(pitch) => {
+                                    let letter =
+                                        step_to_note_letter(&pitch.content.step.content);
+                                    let octave = *pitch.content.octave.content;
+                                    let sf =
+                                        alter_to_sharp_flat(pitch.content.alter.as_ref());
+                                    voice_data[voice_idx].push(NotePlayed {
+                                        note: Note::new(letter, sf, octave),
+                                        engraving,
+                                        duration: dur_raw,
+                                        amplitude: 0.8,
+                                        staff,
+                                        voice: voice_idx,
+                                    });
                                 }
+                                mx::AudibleType::Rest(_) => {
+                                    // Represent rests as amplitude=0 sentinel notes
+                                    voice_data[voice_idx].push(NotePlayed {
+                                        note: Note::new(NoteLetter::C, None, 0),
+                                        engraving,
+                                        duration: dur_raw,
+                                        amplitude: 0.0,
+                                        staff,
+                                        voice: voice_idx,
+                                    });
+                                }
+                                mx::AudibleType::Unpitched(_) => {}
                             }
                         }
-                        _ => {}
                     }
+                    _ => {}
                 }
+            }
 
-                if part_idx == 0 {
-                    comp.measures.push(Measure::new(
-                        current_key,
-                        current_ts,
-                        measure_chord,
-                        current_ms_per_tick,
-                    ));
+            if part_idx == 0 {
+                let mut meas =
+                    Measure::new(current_key, current_ts, measure_chord, current_tempo_bpm);
+                meas.divisions = current_divs.min(u32::from(u16::MAX)) as u16;
+                meas.notes = voice_data;
+                // Infer staves from note data
+                let has_staff2 = meas
+                    .notes
+                    .iter()
+                    .flatten()
+                    .any(|n| n.staff == Some(2));
+                if has_staff2 {
+                    meas.staves = vec![Staff::Grand];
+                } else {
+                    meas.staves = vec![Staff::Treble];
                 }
-
-                measure_start_tick += ticks_per_measure(&current_ts, ticks_per_sixteenth);
+                comp.measures.push(meas);
             }
         }
-    }
-
-    if let Some(first_measure) = comp.measures.first() {
-        comp.ms_per_tick = first_measure.tempo;
-        comp.key = first_measure.key;
     }
 
     comp
@@ -1362,18 +1109,14 @@ pub fn read_musicxml(path: &Path) -> io::Result<Composition> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        composition::NotesStartingThisTick,
-        instrument::Instrument,
-        note::{Note, NoteDurationGeneral},
-    };
+    use crate::{instrument::Instrument, note::Note};
 
     fn test_key() -> Key {
         Key::new(NoteLetter::C, SharpFlat::Natural, MajorMinor::Major)
     }
 
     #[test]
-    fn musicxml_reader_honors_backup_forward_staff_voice_and_tempo() {
+    fn musicxml_reader_honors_staff_voice_and_tempo() {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
 <score-partwise version="4.0">
@@ -1400,15 +1143,6 @@ mod tests {
       </note>
       <backup><duration>4</duration></backup>
       <note>
-        <rest/>
-        <duration>2</duration>
-        <voice>2</voice>
-        <type>eighth</type>
-        <staff>1</staff>
-      </note>
-      <forward><duration>2</duration></forward>
-      <backup><duration>4</duration></backup>
-      <note>
         <pitch><step>C</step><octave>3</octave></pitch>
         <duration>4</duration>
         <voice>5</voice>
@@ -1422,112 +1156,63 @@ mod tests {
         let score = musicxml::read_score_data_partwise(xml.as_bytes().to_vec()).unwrap();
         let composition = score_to_composition(&score);
 
-        assert_eq!(composition.ticks_per_sixteenth_note, 1);
-        assert_eq!(composition.ms_per_tick, 167);
         assert_eq!(composition.measures.len(), 1);
-        assert_eq!(composition.measures[0].tempo, 167);
-        assert_eq!(composition.notes_by_tick.len(), 1);
-        assert_eq!(composition.notes_by_tick[0].notes.len(), 2);
-
-        let treble = composition.notes_by_tick[0]
-            .notes
-            .iter()
-            .find(|note| note.staff == Some(1))
-            .unwrap();
+        let meas = &composition.measures[0];
+        assert_eq!(meas.tempo, 90);
+        assert_eq!(meas.divisions, 4);
+        // Two voices: "1" and "5"
+        assert_eq!(meas.notes.len(), 2);
+        let treble = meas.notes[0].iter().find(|n| n.staff == Some(1)).unwrap();
         assert_eq!(treble.note.octave, 5);
-        assert_eq!(treble.voice.as_deref(), Some("1"));
-        assert_eq!(
-            treble.duration,
-            NoteDurationGeneral::Traditional(NoteEngraving::Quarter)
-        );
-
-        let bass = composition.notes_by_tick[0]
-            .notes
-            .iter()
-            .find(|note| note.staff == Some(2))
-            .unwrap();
+        let bass = meas.notes[1].iter().find(|n| n.staff == Some(2)).unwrap();
         assert_eq!(bass.note.octave, 3);
-        assert_eq!(bass.voice.as_deref(), Some("5"));
-        assert_eq!(
-            bass.duration,
-            NoteDurationGeneral::Traditional(NoteEngraving::Quarter)
-        );
     }
 
     #[test]
-    fn musicxml_writer_keeps_same_staff_voices_separate() {
+    fn musicxml_writer_emits_backup_between_voices() {
         let key = test_key();
-        let mut composition =
-            Composition::new(1, 100, key, Temperament::Even, vec![Instrument::Piano]);
-        composition
-            .measures
-            .push(Measure::new(key, TimeSignature::new(4, 4), None, 100));
-        composition.notes_by_tick.push(NotesStartingThisTick {
-            notes: vec![
-                NotePlayed {
-                    note: Note::new(NoteLetter::C, Some(SharpFlat::Natural), 5),
-                    engraving: NoteDurationGeneral::Traditional(NoteEngraving::Quarter),
-                    amplitude: 0.8,
-                    staff: Some(1),
-                    voice: Some(String::from("1")),
-                },
-                NotePlayed {
-                    note: Note::new(NoteLetter::G, Some(SharpFlat::Natural), 4),
-                    engraving: NoteDurationGeneral::Traditional(NoteEngraving::Half),
-                    amplitude: 0.8,
-                    staff: Some(1),
-                    voice: Some(String::from("2")),
-                },
-                NotePlayed {
-                    note: Note::new(NoteLetter::C, Some(SharpFlat::Natural), 3),
-                    engraving: NoteDurationGeneral::Traditional(NoteEngraving::Half),
-                    amplitude: 0.8,
-                    staff: Some(2),
-                    voice: Some(String::from("5")),
-                },
-            ],
-        });
+        let mut comp = Composition::new(Temperament::Even, vec![Instrument::Piano]);
+        let mut measure = Measure::new(key, TimeSignature::new(4, 4), None, 100);
+        measure.divisions = 4;
+        let half_dur = NoteEngraving::Half.to_duration_ticks(4);
+        measure.notes = vec![
+            vec![NotePlayed {
+                note: Note::new(NoteLetter::C, Some(SharpFlat::Natural), 5),
+                engraving: NoteEngraving::Half,
+                duration: half_dur,
+                amplitude: 0.8,
+                staff: Some(1),
+                voice: 0,
+            }],
+            vec![NotePlayed {
+                note: Note::new(NoteLetter::C, Some(SharpFlat::Natural), 3),
+                engraving: NoteEngraving::Half,
+                duration: half_dur,
+                amplitude: 0.8,
+                staff: Some(2),
+                voice: 1,
+            }],
+        ];
+        comp.measures.push(measure);
 
-        let score = composition_to_score(&composition);
-        let mx::PartElement::Measure(measure) = &score.content.part[0].content[0] else {
-            panic!("expected first part element to be a measure");
+        let score = composition_to_score(&comp);
+        let mx::PartElement::Measure(m) = &score.content.part[0].content[0] else {
+            panic!("expected measure");
         };
 
-        let backup_count = measure
+        let backup_count = m
             .content
             .iter()
-            .filter(|element| matches!(element, mx::MeasureElement::Backup(_)))
+            .filter(|e| matches!(e, mx::MeasureElement::Backup(_)))
             .count();
-        assert_eq!(backup_count, 2);
-
-        let mut pitched_voices = Vec::new();
-        for element in &measure.content {
-            if let mx::MeasureElement::Note(note) = element {
-                if let mx::NoteType::Normal(info) = &note.content.info {
-                    if matches!(info.audible, mx::AudibleType::Pitch(_)) {
-                        assert!(info.chord.is_none());
-                        pitched_voices.push((
-                            parse_staff_number(note.content.staff.as_ref()),
-                            note.content
-                                .voice
-                                .as_ref()
-                                .map(|voice| voice.content.clone()),
-                        ));
-                    }
-                }
-            }
-        }
-
-        assert!(pitched_voices.contains(&(Some(1), Some(String::from("1")))));
-        assert!(pitched_voices.contains(&(Some(1), Some(String::from("2")))));
-        assert!(pitched_voices.contains(&(Some(2), Some(String::from("5")))));
+        assert_eq!(backup_count, 1);
     }
 
     #[test]
     fn raw_musicxml_doctype_is_upgraded_to_4_0() {
         let key = test_key();
-        let composition = Composition::new(1, 100, key, Temperament::Even, vec![Instrument::Piano]);
-        let score = composition_to_score(&composition);
+        let comp = Composition::new(Temperament::Even, vec![Instrument::Piano]);
+        let score = composition_to_score(&comp);
         let raw = musicxml::write_partwise_score_data(&score, false, false).unwrap();
         let normalized = normalize_raw_musicxml_doctype(String::from_utf8(raw).unwrap());
 
