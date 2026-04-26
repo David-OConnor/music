@@ -1,11 +1,11 @@
 use std::path::Path;
 
-use chord::{Chord, ChordQuality::*};
+use chord::{Chord, ChordQuality, ChordQuality::*};
 use egui::Ui;
 use key_scale::{Key, MajorMinor, SharpFlat};
 
 use crate::{
-    chord::{Inversion, prog_1645},
+    chord::{ChordDegree, Inversion, prog_1645},
     composition::Composition,
     gui::{WINDOW_HEIGHT, WINDOW_WIDTH},
     instrument::Instrument,
@@ -31,23 +31,108 @@ mod music_xml;
 mod note;
 mod overtones;
 mod player;
-//
 
-// pub struct NotePlayed {
-//     /// hz
-//     pub pitch: f32,
-//     /// seconds
-//     pub duration: f32,
-// }
+pub struct StateUi {
+    pub prog_editor: ProgEditorUi,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct ProgEditorChordUi {
+    pub degree: ChordDegree,
+    pub quality: ChordQuality,
+    pub extension: Option<u8>,
+    pub inversion: Inversion,
+    pub alterations: Vec<(SharpFlat, u8)>,
+}
+
+impl ProgEditorChordUi {
+    pub fn from_chord(chord: &Chord, key: Key) -> Self {
+        Self {
+            degree: chord.degree_in_key(key).unwrap_or_default(),
+            quality: chord.quality,
+            extension: chord.extension,
+            inversion: chord.inversion,
+            alterations: chord.alterations.clone(),
+        }
+    }
+
+    pub fn to_chord(&self, key: Key) -> Chord {
+        let mut chord = self.degree.get_chord(key, self.inversion);
+        chord.quality = self.quality;
+        chord.extension = self.extension;
+        chord.alterations = self.alterations.clone();
+        chord
+    }
+}
+
+impl Default for ProgEditorChordUi {
+    fn default() -> Self {
+        Self {
+            degree: ChordDegree::I,
+            quality: ChordQuality::Major,
+            extension: None,
+            inversion: Inversion::Root,
+            alterations: vec![],
+        }
+    }
+}
+
+pub struct ProgEditorUi {
+    pub key: Key,
+    pub chord_to_add: ProgEditorChordUi,
+    pub chords: Vec<ProgEditorChordUi>,
+}
+
+impl ProgEditorUi {
+    pub fn rebuild_progression(&self) -> Vec<Chord> {
+        self.chords
+            .iter()
+            .map(|chord_ui| chord_ui.to_chord(self.key))
+            .collect()
+    }
+
+    pub fn sync_from_progression(&mut self, chords: &[Chord]) {
+        if self.chords.len() == chords.len() {
+            return;
+        }
+
+        self.chords = chords
+            .iter()
+            .map(|chord| ProgEditorChordUi::from_chord(chord, self.key))
+            .collect();
+    }
+}
+
+impl Default for ProgEditorUi {
+    fn default() -> Self {
+        Self {
+            key: Key::default(),
+            chord_to_add: ProgEditorChordUi::default(),
+            chords: vec![],
+        }
+    }
+}
+
+impl Default for StateUi {
+    fn default() -> Self {
+        Self {
+            prog_editor: ProgEditorUi::default(),
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct State {
     pub compositions: Vec<Composition>,
+    /// For creating compositions based on chord progressions, creating compositions on their own,
+    /// etc.
+    pub chord_prog_active: Vec<Chord>,
+    pub ui: StateUi,
 }
 
 impl eframe::App for State {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        gui::draw(self, ui.ctx());
+        gui::draw(self, ui);
     }
 }
 

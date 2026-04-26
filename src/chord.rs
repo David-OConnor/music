@@ -18,9 +18,10 @@ use crate::{
 ///
 /// We don't specify major/minor here (e.g. "VI" vs "vi"), as we determine that from
 /// the key when creating chords from this.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 #[repr(u8)] // todo: RM this repr if you don't use it.
 pub enum ChordDegree {
+    #[default]
     I = 1,
     II = 2,
     III = 3,
@@ -31,16 +32,56 @@ pub enum ChordDegree {
 }
 
 impl ChordDegree {
+    pub const fn all() -> [Self; 7] {
+        [
+            Self::I,
+            Self::II,
+            Self::III,
+            Self::IV,
+            Self::V,
+            Self::VI,
+            Self::VII,
+        ]
+    }
+
+    pub fn root_note(self, key: Key) -> Note {
+        let notes = key.get_notes();
+        let (letter, sf) = notes[self as usize - 1];
+        Note::new(letter, Some(sf), 4)
+    }
+
     /// Returns the diatonic triad for this scale degree in the given key.
     /// Extensions and alterations are not included; use `Chord` directly for those.
     pub fn get_chord(self, key: Key, inversion: Inversion) -> Chord {
-        let notes = key.get_notes();
-
-        let (letter, sf) = notes[self as usize - 1];
-        let root = Note::new(letter, Some(sf), 4);
+        let root = self.root_note(key);
         let quality = key.diatonic_quality(self);
 
-        Chord::new(root, quality, None, vec![], Inversion::Root)
+        Chord::new(root, quality, None, vec![], inversion)
+    }
+
+    pub fn to_string(&self, key: Key, inversion: Inversion) -> String {
+        let chord = &self.get_chord(key, inversion);
+
+        let mut res = match self {
+            Self::I => "I",
+            Self::II => "II",
+            Self::III => "III",
+            Self::IV => "IV",
+            Self::V => "V",
+            Self::VI => "VI",
+            Self::VII => "VII",
+        }
+        .to_string();
+
+        match chord.quality {
+            ChordQuality::Major | ChordQuality::Dominant | ChordQuality::Augmented => (),
+            _ => {
+                res = res.to_lowercase();
+            }
+        }
+        // todo: Inversion or more A/R
+
+        res
     }
 }
 
@@ -127,6 +168,16 @@ impl Chord {
     pub fn with_inversion(mut self, inversion: Inversion) -> Self {
         self.inversion = inversion;
         self
+    }
+
+    pub fn degree_in_key(&self, key: Key) -> Option<ChordDegree> {
+        let root_sf = self.root.sharp_flat.unwrap_or(SharpFlat::Natural);
+
+        ChordDegree::all().into_iter().find(|degree| {
+            let degree_root = degree.root_note(key);
+            degree_root.letter == self.root.letter
+                && degree_root.sharp_flat.unwrap_or(SharpFlat::Natural) == root_sf
+        })
     }
 }
 
@@ -472,5 +523,17 @@ mod chord_prog_tests {
         let chord = ChordDegree::VI.get_chord(a_minor(), Inversion::Root);
         assert_eq!(chord.root.letter, NoteLetter::F);
         assert_eq!(chord.quality, ChordQuality::Major);
+    }
+
+    #[test]
+    fn requested_inversion_is_preserved() {
+        let chord = ChordDegree::I.get_chord(c_major(), Inversion::First);
+        assert_eq!(chord.inversion, Inversion::First);
+    }
+
+    #[test]
+    fn degree_in_key_round_trips_for_diatonic_chords() {
+        let chord = ChordDegree::IV.get_chord(c_major(), Inversion::Second);
+        assert_eq!(chord.degree_in_key(c_major()), Some(ChordDegree::IV));
     }
 }

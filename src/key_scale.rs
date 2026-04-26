@@ -96,6 +96,16 @@ pub struct Key {
     pub major_minor: MajorMinor,
 }
 
+impl Default for Key {
+    fn default() -> Self {
+        Self {
+            base_note: NoteLetter::C,
+            sharp_flat: SharpFlat::default(),
+            major_minor: MajorMinor::Major,
+        }
+    }
+}
+
 impl Display for Key {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         write!(
