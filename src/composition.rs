@@ -74,8 +74,8 @@ pub struct Composition {
     pub measures: Vec<Measure>,
     // /// Not required, but may help with generation, improvisation etc.
     // pub chord_progression: Option<ChordProgression>,
-    /// Default key for notes whose sharp_flat field is None.
-    pub key: Key,
+    /// Default key for notes whose sharp_flat field is None. todo: Remove?
+    // pub key: Key,
     pub temperament: Temperament,
 }
 
