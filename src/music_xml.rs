@@ -9,7 +9,7 @@ use musicxml::{datatypes as mxd, elements as mx};
 
 use crate::{
     chord::{Chord, ChordQuality, Inversion},
-    composition::Composition,
+    composition::{CompMetadata, Composition},
     instrument::Instrument,
     key_scale::{Key, MajorMinor, SharpFlat},
     measure::{Measure, Staff, TimeSignature},
@@ -238,6 +238,84 @@ fn instrument_name(instr: Instrument) -> String {
         Instrument::Banjo => "Banjo",
     }
     .to_string()
+}
+
+fn metadata_value(text: Option<&str>) -> Option<String> {
+    text.map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
+fn score_credit_words(credit: &mx::Credit) -> Option<String> {
+    match &credit.content.credit {
+        mx::CreditSubcontents::Text(contents) => contents
+            .credit_words
+            .as_ref()
+            .map(|credit_words| credit_words.content.as_str())
+            .into_iter()
+            .chain(contents.additional.iter().filter_map(|entry| {
+                entry
+                    .credit_words
+                    .as_ref()
+                    .map(|credit_words| credit_words.content.as_str())
+            }))
+            .find_map(|text| metadata_value(Some(text))),
+        mx::CreditSubcontents::Image(_) => None,
+    }
+}
+
+fn score_credit_value(score: &mx::ScorePartwise, credit_type: &str) -> Option<String> {
+    score.content.credit.iter().find_map(|credit| {
+        credit
+            .content
+            .credit_type
+            .iter()
+            .any(|kind| kind.content.trim().eq_ignore_ascii_case(credit_type))
+            .then(|| score_credit_words(credit))
+            .flatten()
+    })
+}
+
+fn metadata_credit(credit_type: &str, text: &str) -> mx::Credit {
+    mx::Credit {
+        attributes: mx::CreditAttributes::default(),
+        content: mx::CreditContents {
+            credit_type: vec![mx::CreditType {
+                attributes: (),
+                content: credit_type.to_string(),
+            }],
+            link: vec![],
+            bookmark: vec![],
+            credit: mx::CreditSubcontents::Text(mx::CreditTextContents {
+                credit_words: Some(mx::CreditWords {
+                    attributes: mx::CreditWordsAttributes::default(),
+                    content: text.to_string(),
+                }),
+                credit_symbol: None,
+                additional: vec![],
+            }),
+        },
+    }
+}
+
+fn score_misc_field(identification: &mx::Identification, name: &str) -> Option<String> {
+    identification
+        .content
+        .miscellaneous
+        .as_ref()?
+        .content
+        .miscellaneous_field
+        .iter()
+        .find_map(|field| {
+            field
+                .attributes
+                .name
+                .0
+                .trim()
+                .eq_ignore_ascii_case(name)
+                .then(|| metadata_value(Some(field.content.as_str())))
+                .flatten()
+        })
 }
 
 fn parse_instrument_name(name: &str) -> Instrument {
@@ -926,6 +1004,11 @@ fn make_measure_attrs(key: Key, ts: &TimeSignature, instr: Instrument, dpq: u32)
 // --- Score building ---
 
 fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
+    let title = metadata_value(comp.metadata.title.as_deref());
+    let subtitle = metadata_value(comp.metadata.subtitle.as_deref());
+    let composer = metadata_value(comp.metadata.composer.as_deref());
+    let copyright = metadata_value(comp.metadata.copyright.as_deref());
+
     let part_list = mx::PartList {
         attributes: (),
         content: mx::PartListContents {
@@ -1113,12 +1196,80 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
             version: Some(mxd::Token("4.0".to_string())),
         },
         content: mx::ScorePartwiseContents {
-            work: None,
+            work: title.as_ref().map(|title| mx::Work {
+                attributes: (),
+                content: mx::WorkContents {
+                    work_number: None,
+                    work_title: Some(mx::WorkTitle {
+                        attributes: (),
+                        content: title.clone(),
+                    }),
+                    opus: None,
+                },
+            }),
             movement_number: None,
-            movement_title: None,
-            identification: None,
+            movement_title: title.as_ref().map(|title| mx::MovementTitle {
+                attributes: (),
+                content: title.clone(),
+            }),
+            identification: (composer.is_some() || copyright.is_some() || subtitle.is_some()).then(
+                || mx::Identification {
+                    attributes: (),
+                    content: mx::IdentificationContents {
+                        creator: composer
+                            .iter()
+                            .map(|composer| mx::Creator {
+                                attributes: mx::CreatorAttributes {
+                                    r#type: Some(mxd::Token("composer".to_string())),
+                                },
+                                content: composer.clone(),
+                            })
+                            .collect(),
+                        rights: copyright
+                            .iter()
+                            .map(|copyright| mx::Rights {
+                                attributes: mx::RightsAttributes { r#type: None },
+                                content: copyright.clone(),
+                            })
+                            .collect(),
+                        encoding: None,
+                        source: None,
+                        relation: vec![],
+                        miscellaneous: subtitle.as_ref().map(|subtitle| mx::Miscellaneous {
+                            attributes: (),
+                            content: mx::MiscellaneousContents {
+                                miscellaneous_field: vec![mx::MiscellaneousField {
+                                    attributes: mx::MiscellaneousFieldAttributes {
+                                        name: mxd::Token("subtitle".to_string()),
+                                    },
+                                    content: subtitle.clone(),
+                                }],
+                            },
+                        }),
+                    },
+                },
+            ),
             defaults: None,
-            credit: vec![],
+            credit: title
+                .as_deref()
+                .map(|title| metadata_credit("title", title))
+                .into_iter()
+                .chain(
+                    subtitle
+                        .as_deref()
+                        .map(|subtitle| metadata_credit("subtitle", subtitle)),
+                )
+                .chain(
+                    composer
+                        .as_deref()
+                        .map(|composer| metadata_credit("composer", composer)),
+                )
+                .chain(
+                    copyright
+                        .as_deref()
+                        .map(|copyright| metadata_credit("rights", copyright)),
+                )
+                .collect(),
             part_list,
             part: parts,
         },
@@ -1136,6 +1287,71 @@ fn extract_bpm_from_sound(sound: &mx::Sound) -> Option<u16> {
 
 fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
     let mut comp = Composition::new(Temperament::Even, vec![]);
+    let title = score
+        .content
+        .movement_title
+        .as_ref()
+        .and_then(|title| metadata_value(Some(title.content.as_str())))
+        .or_else(|| {
+            score.content.work.as_ref().and_then(|work| {
+                work.content
+                    .work_title
+                    .as_ref()
+                    .and_then(|title| metadata_value(Some(title.content.as_str())))
+            })
+        })
+        .or_else(|| score_credit_value(score, "title"));
+    let subtitle = score
+        .content
+        .identification
+        .as_ref()
+        .and_then(|identification| score_misc_field(identification, "subtitle"))
+        .or_else(|| score_credit_value(score, "subtitle"));
+    let composer = score
+        .content
+        .identification
+        .as_ref()
+        .and_then(|identification| {
+            identification
+                .content
+                .creator
+                .iter()
+                .find_map(|creator| {
+                    creator
+                        .attributes
+                        .r#type
+                        .as_ref()
+                        .filter(|kind| kind.0.trim().eq_ignore_ascii_case("composer"))
+                        .and_then(|_| metadata_value(Some(creator.content.as_str())))
+                })
+                .or_else(|| {
+                    identification
+                        .content
+                        .creator
+                        .iter()
+                        .find_map(|creator| metadata_value(Some(creator.content.as_str())))
+                })
+        })
+        .or_else(|| score_credit_value(score, "composer"));
+    let copyright = score
+        .content
+        .identification
+        .as_ref()
+        .and_then(|identification| {
+            identification
+                .content
+                .rights
+                .iter()
+                .find_map(|rights| metadata_value(Some(rights.content.as_str())))
+        })
+        .or_else(|| score_credit_value(score, "rights"));
+
+    comp.metadata = CompMetadata {
+        title,
+        subtitle,
+        composer,
+        copyright,
+    };
     let part_instruments: Vec<Instrument> = score
         .content
         .part_list
@@ -1541,5 +1757,37 @@ mod tests {
 
         assert!(normalized.contains(MUSICXML_4_PARTWISE_DOCTYPE));
         assert!(!normalized.contains(MUSICXML_3_PARTWISE_DOCTYPE));
+    }
+
+    #[test]
+    fn musicxml_round_trip_preserves_score_metadata() {
+        let key = test_key();
+        let mut comp = Composition::new(Temperament::Even, vec![Instrument::Piano]);
+        comp.metadata.title = Some("Starlight".to_string());
+        comp.metadata.subtitle = Some("For Quiet Evenings".to_string());
+        comp.metadata.composer = Some("A. Example".to_string());
+        comp.metadata.copyright = Some("Copyright 2026 A. Example".to_string());
+        comp.measures_by_part[0]
+            .1
+            .push(Measure::new(key, TimeSignature::new(4, 4), None, 96));
+
+        let score = composition_to_score(&comp);
+        let raw = musicxml::write_partwise_score_data(&score, false, false).unwrap();
+        let parsed = musicxml::read_score_data_partwise(raw).unwrap();
+        let round_tripped = score_to_composition(&parsed);
+
+        assert_eq!(round_tripped.metadata.title.as_deref(), Some("Starlight"));
+        assert_eq!(
+            round_tripped.metadata.subtitle.as_deref(),
+            Some("For Quiet Evenings")
+        );
+        assert_eq!(
+            round_tripped.metadata.composer.as_deref(),
+            Some("A. Example")
+        );
+        assert_eq!(
+            round_tripped.metadata.copyright.as_deref(),
+            Some("Copyright 2026 A. Example")
+        );
     }
 }

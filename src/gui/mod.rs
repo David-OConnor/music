@@ -16,6 +16,10 @@ fn composition_list(comps: &[Composition], ui: &mut Ui) {
         ui.label(title_sanitized_for_gui);
 
         ui.horizontal(|ui| {
+            if ui.button("Load").clicked() {
+                // todo: File dialog using
+            }
+
             if ui.button("Play").clicked() {
                 if comp.play().is_err() {
                     eprintln!("Problem playing music")

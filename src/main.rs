@@ -262,9 +262,6 @@ fn main() {
     let xml_path = Path::new("./demo.musicxml");
     let midi_path = Path::new("./demo.mid");
 
-    comp.save_musicxml(MusicXmlFormat::Raw, &xml_path).unwrap();
-    comp.save_midi(&midi_path).unwrap();
-
     let comp_loaded = Composition::load_musicxml(Path::new(
         "C:/Users/the_a/compositions/training_etc/alicia-clair-obscur-expedition-33-main-theme-piano-solo.mxl",
     ))
