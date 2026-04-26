@@ -546,7 +546,7 @@ fn push_measure_meta_events(
     seq: &mut usize,
     ticks_per_quarter: u16,
 ) -> io::Result<()> {
-    if comp.measures.is_empty() {
+    if comp.measures_by_part.is_empty() {
         return push_default_meta_events(comp, events, seq, ticks_per_quarter);
     }
 
@@ -555,7 +555,7 @@ fn push_measure_meta_events(
     let mut last_time_signature = None;
     let mut last_ms_per_tick = None;
 
-    for measure in &comp.measures {
+    for measure in &comp.measures_by_part {
         if last_key != Some(measure.key) {
             push_timed_event(
                 events,
@@ -1140,7 +1140,7 @@ fn parse_smf(bytes: &[u8]) -> io::Result<Composition> {
         last_note_end = last_note_end.max(note.end_tick);
     }
 
-    composition.measures = build_measures(
+    composition.measures_by_part = build_measures(
         last_note_end,
         ticks_per_sixteenth,
         &key_changes,
@@ -1199,7 +1199,7 @@ mod tests {
     fn midi_round_trip_preserves_basic_composition_data() {
         let key = Key::new(NoteLetter::G, SharpFlat::Natural, MajorMinor::Major);
         let mut comp = Composition::new(1, 125, key, Temperament::Even, vec![Instrument::Guitar]);
-        comp.measures = vec![
+        comp.measures_by_part = vec![
             Measure::new(key, TimeSignature::new(4, 4), None, 125),
             Measure::new(key, TimeSignature::new(4, 4), None, 125),
         ];
@@ -1234,7 +1234,7 @@ mod tests {
         assert_eq!(parsed.key, key);
         assert_eq!(parsed.instruments.len(), 1);
         assert!(parsed.instruments[0] == Instrument::Guitar);
-        assert_eq!(parsed.measures.len(), 1);
+        assert_eq!(parsed.measures_by_part.len(), 1);
 
         assert_eq!(parsed.notes_by_tick[0].notes.len(), 1);
         assert_eq!(parsed.notes_by_tick[0].notes[0].note.letter, NoteLetter::G);

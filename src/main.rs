@@ -270,7 +270,7 @@ fn make_test_bassline() -> Composition {
     }
 
     comp.notes_by_tick = notes;
-    comp.measures = measures;
+    comp.measures_by_part = measures;
 
     comp
 }
@@ -360,7 +360,7 @@ fn make_comp_from_prog(key: Key, chords: &[Chord]) -> Composition {
     );
 
     comp.notes_by_tick = notes;
-    comp.measures = measures;
+    comp.measures_by_part = measures;
 
     comp
 }

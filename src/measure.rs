@@ -29,7 +29,7 @@ pub struct Measure {
     ///
     /// Voices are used to deconflict notes for displaying on sheet music. Notably comes up on
     /// piano and other multi-note instruments. Similar to the implementation in MusicXml.
-    pub notes: Vec<Vec<NotePlayed>>,
+    pub notes: Vec<Vec<Vec<NotePlayed>>>,
 }
 
 impl Measure {

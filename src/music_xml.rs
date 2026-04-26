@@ -768,7 +768,7 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
     let mut last_ts: Option<TimeSignature> = None;
     let mut last_tempo: Option<u16> = None;
 
-    for (mi, measure) in comp.measures.iter().enumerate() {
+    for (mi, measure) in comp.measures_by_part.iter().enumerate() {
         let dpq = measure.divisions as u32;
         let ts = measure.time_signature;
         let mut measure_content: Vec<mx::MeasureElement> = vec![];
@@ -800,8 +800,7 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
         }
 
         // Total divisions in this measure (= ticks)
-        let measure_total_divs =
-            dpq * 4 * ts.numerator as u32 / ts.denominator as u32;
+        let measure_total_divs = dpq * 4 * ts.numerator as u32 / ts.denominator as u32;
 
         for (vi, voice_notes) in measure.notes.iter().enumerate() {
             if vi > 0 {
@@ -975,8 +974,7 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                     mx::MeasureElement::Note(note) => {
                         if let mx::NoteType::Normal(info) = &note.content.info {
                             let is_chord = info.chord.is_some();
-                            let dur_raw = (*info.duration.content)
-                                .min(u32::from(u16::MAX)) as u16;
+                            let dur_raw = (*info.duration.content).min(u32::from(u16::MAX)) as u16;
 
                             let voice_str = if is_chord {
                                 // Each chord note gets its own auto-voice
@@ -990,15 +988,15 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                     .unwrap_or_else(|| "1".to_string())
                             };
 
-                            let voice_idx =
-                                if let Some(idx) = voice_order.iter().position(|v| v == &voice_str)
-                                {
-                                    idx
-                                } else {
-                                    voice_order.push(voice_str.clone());
-                                    voice_data.push(Vec::new());
-                                    voice_order.len() - 1
-                                };
+                            let voice_idx = if let Some(idx) =
+                                voice_order.iter().position(|v| v == &voice_str)
+                            {
+                                idx
+                            } else {
+                                voice_order.push(voice_str.clone());
+                                voice_data.push(Vec::new());
+                                voice_order.len() - 1
+                            };
 
                             let engraving = if let Some(type_el) = &note.content.r#type {
                                 let base = type_value_to_duration_class(&type_el.content);
@@ -1014,16 +1012,13 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                 )
                             };
 
-                            let staff =
-                                parse_staff_number(note.content.staff.as_ref());
+                            let staff = parse_staff_number(note.content.staff.as_ref());
 
                             match &info.audible {
                                 mx::AudibleType::Pitch(pitch) => {
-                                    let letter =
-                                        step_to_note_letter(&pitch.content.step.content);
+                                    let letter = step_to_note_letter(&pitch.content.step.content);
                                     let octave = *pitch.content.octave.content;
-                                    let sf =
-                                        alter_to_sharp_flat(pitch.content.alter.as_ref());
+                                    let sf = alter_to_sharp_flat(pitch.content.alter.as_ref());
                                     voice_data[voice_idx].push(NotePlayed {
                                         note: Note::new(letter, sf, octave),
                                         engraving,
@@ -1058,17 +1053,13 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                 meas.divisions = current_divs.min(u32::from(u16::MAX)) as u16;
                 meas.notes = voice_data;
                 // Infer staves from note data
-                let has_staff2 = meas
-                    .notes
-                    .iter()
-                    .flatten()
-                    .any(|n| n.staff == Some(2));
+                let has_staff2 = meas.notes.iter().flatten().any(|n| n.staff == Some(2));
                 if has_staff2 {
                     meas.staves = vec![Staff::Grand];
                 } else {
                     meas.staves = vec![Staff::Treble];
                 }
-                comp.measures.push(meas);
+                comp.measures_by_part.push(meas);
             }
         }
     }
@@ -1156,8 +1147,8 @@ mod tests {
         let score = musicxml::read_score_data_partwise(xml.as_bytes().to_vec()).unwrap();
         let composition = score_to_composition(&score);
 
-        assert_eq!(composition.measures.len(), 1);
-        let meas = &composition.measures[0];
+        assert_eq!(composition.measures_by_part.len(), 1);
+        let meas = &composition.measures_by_part[0];
         assert_eq!(meas.tempo, 90);
         assert_eq!(meas.divisions, 4);
         // Two voices: "1" and "5"
@@ -1193,7 +1184,7 @@ mod tests {
                 voice: 1,
             }],
         ];
-        comp.measures.push(measure);
+        comp.measures_by_part.push(measure);
 
         let score = composition_to_score(&comp);
         let mx::PartElement::Measure(m) = &score.content.part[0].content[0] else {

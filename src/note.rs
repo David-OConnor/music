@@ -100,19 +100,33 @@ impl NoteEngraving {
     pub fn from_duration_ticks(ticks: u16, divisions: u16) -> Self {
         let d = divisions as u32;
         let t = ticks as u32;
-        if t == d * 4 { Self::Whole }
-        else if t == d * 3 { Self::HalfDotted }
-        else if t == d * 2 { Self::Half }
-        else if d >= 2 && t == d * 3 / 2 { Self::QuarterDotted }
-        else if t == d { Self::Quarter }
-        else if d >= 4 && t == d * 3 / 4 { Self::EithDotted }
-        else if d >= 2 && t == d / 2 { Self::Eighth }
-        else if d >= 4 && t == d * 3 / 8 { Self::SixteenthDotted }
-        else if d >= 4 && t == d / 4 { Self::Sixteenth }
-        else if d >= 8 && t == d / 8 { Self::ThirtySecond }
-        else if d >= 16 && t == d / 16 { Self::SixtyFourth }
-        else if d >= 32 && t == d / 32 { Self::OneTwentyEighth }
-        else { Self::Quarter }
+        if t == d * 4 {
+            Self::Whole
+        } else if t == d * 3 {
+            Self::HalfDotted
+        } else if t == d * 2 {
+            Self::Half
+        } else if d >= 2 && t == d * 3 / 2 {
+            Self::QuarterDotted
+        } else if t == d {
+            Self::Quarter
+        } else if d >= 4 && t == d * 3 / 4 {
+            Self::EithDotted
+        } else if d >= 2 && t == d / 2 {
+            Self::Eighth
+        } else if d >= 4 && t == d * 3 / 8 {
+            Self::SixteenthDotted
+        } else if d >= 4 && t == d / 4 {
+            Self::Sixteenth
+        } else if d >= 8 && t == d / 8 {
+            Self::ThirtySecond
+        } else if d >= 16 && t == d / 16 {
+            Self::SixtyFourth
+        } else if d >= 32 && t == d / 32 {
+            Self::OneTwentyEighth
+        } else {
+            Self::Quarter
+        }
     }
 }
 

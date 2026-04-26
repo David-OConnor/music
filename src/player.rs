@@ -14,8 +14,12 @@ pub fn play(composition: &Composition) -> io::Result<()> {
     let mut total_samples = 0usize;
     let mut measure_start_sample = 0usize;
 
-    for measure in &composition.measures {
-        let bpm = if measure.tempo > 0 { measure.tempo } else { 120 } as f32;
+    for measure in &composition.measures_by_part {
+        let bpm = if measure.tempo > 0 {
+            measure.tempo
+        } else {
+            120
+        } as f32;
         let div = measure.divisions as f32;
         let seconds_per_div = 60.0 / (bpm * div);
 
@@ -24,16 +28,14 @@ pub fn play(composition: &Composition) -> io::Result<()> {
             for note in voice {
                 let start_s = pos as f32 * seconds_per_div;
                 let dur_s = note.duration as f32 * seconds_per_div;
-                let end = measure_start_sample
-                    + ((start_s + dur_s) * SAMPLE_RATE as f32).ceil() as usize;
+                let end =
+                    measure_start_sample + ((start_s + dur_s) * SAMPLE_RATE as f32).ceil() as usize;
                 total_samples = total_samples.max(end);
                 pos += note.duration as u32;
             }
         }
 
-        let measure_divs = measure.divisions as u32
-            * 4
-            * measure.time_signature.numerator as u32
+        let measure_divs = measure.divisions as u32 * 4 * measure.time_signature.numerator as u32
             / measure.time_signature.denominator as u32;
         measure_start_sample +=
             (measure_divs as f32 * seconds_per_div * SAMPLE_RATE as f32).ceil() as usize;
@@ -48,8 +50,12 @@ pub fn play(composition: &Composition) -> io::Result<()> {
     // Second pass: fill buffer
     let mut measure_start_sample = 0usize;
 
-    for measure in &composition.measures {
-        let bpm = if measure.tempo > 0 { measure.tempo } else { 120 } as f32;
+    for measure in &composition.measures_by_part {
+        let bpm = if measure.tempo > 0 {
+            measure.tempo
+        } else {
+            120
+        } as f32;
         let div = measure.divisions as f32;
         let seconds_per_div = 60.0 / (bpm * div);
 
@@ -63,8 +69,7 @@ pub fn play(composition: &Composition) -> io::Result<()> {
 
                 let start_s = pos as f32 * seconds_per_div;
                 let dur_s = note.duration as f32 * seconds_per_div;
-                let start_sample =
-                    measure_start_sample + (start_s * SAMPLE_RATE as f32) as usize;
+                let start_sample = measure_start_sample + (start_s * SAMPLE_RATE as f32) as usize;
                 let n = (dur_s * SAMPLE_RATE as f32) as usize;
 
                 let freq = note.frequency(measure.key, composition.temperament);
@@ -90,9 +95,7 @@ pub fn play(composition: &Composition) -> io::Result<()> {
             }
         }
 
-        let measure_divs = measure.divisions as u32
-            * 4
-            * measure.time_signature.numerator as u32
+        let measure_divs = measure.divisions as u32 * 4 * measure.time_signature.numerator as u32
             / measure.time_signature.denominator as u32;
         measure_start_sample +=
             (measure_divs as f32 * seconds_per_div * SAMPLE_RATE as f32).ceil() as usize;

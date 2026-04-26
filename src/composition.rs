@@ -5,10 +5,9 @@
 use std::{fmt, fmt::Display, io, path::Path};
 
 use crate::{
-    instrument::Instrument, measure::Measure, midi, music_xml,
-    music_xml::MusicXmlFormat, overtones::Temperament, player,
+    instrument::Instrument, measure::Measure, midi, music_xml, music_xml::MusicXmlFormat,
+    overtones::Temperament, player,
 };
-
 
 #[derive(Default)]
 pub struct CompMetadata {
@@ -24,28 +23,18 @@ pub struct CompMetadata {
 /// western music conventions.
 pub struct Composition {
     metadata: CompMetadata,
-    // /// We use this to scale the NoteDurationClass (16th notes, 8th notes etc) with
-    // /// the underlying integer tick system. Set to 1 if there is truly no time interval
-    // /// finer than a 16th note.
-    // pub ticks_per_sixteenth_note: u32,
-    // /// This is the base tempo.
-    // pub ms_per_tick: u32,
-    pub instruments: Vec<Instrument>,
-    /// This is indexed by tick, starting at 0.
-    // pub notes_by_tick: Vec<NotesStartingThisTick>,
-    // pub note_sets: Vec<NoteSet>,
-    pub measures: Vec<Measure>,
-    // /// Not required, but may help with generation, improvisation etc.
-    // pub chord_progression: Option<ChordProgression>,
+    // pub instruments: Vec<Instrument>,
+    /// Measures contain notes and other data in convenient divisions. Outer: Parts. (E.g. different
+    /// parts played by each instrument). Inner: Measures for that part.
+    pub measures_by_part: Vec<(Instrument, Vec<Measure>)>,
     /// Default key for notes whose sharp_flat field is None. todo: Remove?
-    // pub key: Key,
     pub temperament: Temperament,
 }
 
 impl Display for Composition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut note_count = 0;
-        for meas in &self.measures {
+        for meas in &self.measures_by_part {
             for voice in &meas.notes {
                 note_count += voice.len();
             }
@@ -57,7 +46,7 @@ impl Display for Composition {
             self.metadata.title,
             self.metadata.subtitle,
             note_count,
-            self.measures.len(),
+            self.measures_by_part.len(),
         )?;
 
         Ok(())
@@ -69,7 +58,7 @@ impl Composition {
         Self {
             metadata: Default::default(),
             instruments,
-            measures: Vec::new(),
+            measures_by_part: Vec::new(),
             temperament,
         }
     }
@@ -95,7 +84,7 @@ impl Composition {
     // }
 
     pub fn add_measure(&mut self, measure: Measure) {
-        self.measures.push(measure);
+        self.measures_by_part.push(measure);
     }
 
     pub fn play(&self) -> io::Result<()> {
