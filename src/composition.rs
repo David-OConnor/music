@@ -22,8 +22,7 @@ pub struct CompMetadata {
 /// and are expanding it to be more general, so as not to be restricted to traditional
 /// western music conventions.
 pub struct Composition {
-    metadata: CompMetadata,
-    // pub instruments: Vec<Instrument>,
+    pub metadata: CompMetadata,
     /// Measures contain notes and other data in convenient divisions. Outer: Parts. (E.g. different
     /// parts played by each instrument). Inner: Measures for that part.
     pub measures_by_part: Vec<(Instrument, Vec<Measure>)>,
@@ -34,19 +33,22 @@ pub struct Composition {
 impl Display for Composition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut note_count = 0;
-        for meas in &self.measures_by_part {
-            for voice in &meas.notes {
-                note_count += voice.len();
+        let mut measure_count = 0;
+        for (_, measures) in &self.measures_by_part {
+            measure_count += measures.len();
+            for measure in measures {
+                for voice in &measure.notes {
+                    note_count += voice.len();
+                }
             }
         }
 
+        let title = self.metadata.title.as_deref().unwrap_or("Untitled");
+        let subtitle = self.metadata.subtitle.as_deref().unwrap_or("-");
         writeln!(
             f,
             "{}, {} | {} notes | {} measures",
-            self.metadata.title,
-            self.metadata.subtitle,
-            note_count,
-            self.measures_by_part.len(),
+            title, subtitle, note_count, measure_count,
         )?;
 
         Ok(())
@@ -57,8 +59,10 @@ impl Composition {
     pub fn new(temperament: Temperament, instruments: Vec<Instrument>) -> Self {
         Self {
             metadata: Default::default(),
-            instruments,
-            measures_by_part: Vec::new(),
+            measures_by_part: instruments
+                .into_iter()
+                .map(|instr| (instr, Vec::new()))
+                .collect(),
             temperament,
         }
     }
@@ -83,8 +87,16 @@ impl Composition {
     //     }
     // }
 
-    pub fn add_measure(&mut self, measure: Measure) {
-        self.measures_by_part.push(measure);
+    pub fn add_measure(&mut self, instrument: Instrument, measure: Measure) {
+        if let Some((_, measures)) = self
+            .measures_by_part
+            .iter_mut()
+            .find(|(part_instrument, _)| *part_instrument == instrument)
+        {
+            measures.push(measure);
+        } else {
+            self.measures_by_part.push((instrument, vec![measure]));
+        }
     }
 
     pub fn play(&self) -> io::Result<()> {

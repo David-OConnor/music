@@ -12,33 +12,34 @@ const FADE_FRACTION: f32 = 0.08;
 pub fn play(composition: &Composition) -> io::Result<()> {
     // First pass: compute total buffer size
     let mut total_samples = 0usize;
-    let mut measure_start_sample = 0usize;
+    for (_, measures) in &composition.measures_by_part {
+        let mut measure_start_sample = 0usize;
 
-    for measure in &composition.measures_by_part {
-        let bpm = if measure.tempo > 0 {
-            measure.tempo
-        } else {
-            120
-        } as f32;
-        let div = measure.divisions as f32;
-        let seconds_per_div = 60.0 / (bpm * div);
+        for measure in measures {
+            let bpm = if measure.tempo > 0 {
+                measure.tempo
+            } else {
+                120
+            } as f32;
+            let div = measure.divisions as f32;
+            let seconds_per_div = 60.0 / (bpm * div);
 
-        for voice in &measure.notes {
-            let mut pos = 0u32;
-            for note in voice {
-                let start_s = pos as f32 * seconds_per_div;
-                let dur_s = note.duration as f32 * seconds_per_div;
-                let end =
-                    measure_start_sample + ((start_s + dur_s) * SAMPLE_RATE as f32).ceil() as usize;
-                total_samples = total_samples.max(end);
-                pos += note.duration as u32;
+            for voice in &measure.notes {
+                let mut pos = 0u32;
+                for note in voice {
+                    let start_s = pos as f32 * seconds_per_div;
+                    let dur_s = note.duration as f32 * seconds_per_div;
+                    let end = measure_start_sample
+                        + ((start_s + dur_s) * SAMPLE_RATE as f32).ceil() as usize;
+                    total_samples = total_samples.max(end);
+                    pos += u32::from(note.duration);
+                }
             }
-        }
 
-        let measure_divs = measure.divisions as u32 * 4 * measure.time_signature.numerator as u32
-            / measure.time_signature.denominator as u32;
-        measure_start_sample +=
-            (measure_divs as f32 * seconds_per_div * SAMPLE_RATE as f32).ceil() as usize;
+            let measure_divs = measure.total_divisions();
+            measure_start_sample +=
+                (measure_divs as f32 * seconds_per_div * SAMPLE_RATE as f32).ceil() as usize;
+        }
     }
 
     if total_samples == 0 {
@@ -48,57 +49,59 @@ pub fn play(composition: &Composition) -> io::Result<()> {
     let mut buf = vec![0f32; total_samples];
 
     // Second pass: fill buffer
-    let mut measure_start_sample = 0usize;
+    for (_, measures) in &composition.measures_by_part {
+        let mut measure_start_sample = 0usize;
 
-    for measure in &composition.measures_by_part {
-        let bpm = if measure.tempo > 0 {
-            measure.tempo
-        } else {
-            120
-        } as f32;
-        let div = measure.divisions as f32;
-        let seconds_per_div = 60.0 / (bpm * div);
+        for measure in measures {
+            let bpm = if measure.tempo > 0 {
+                measure.tempo
+            } else {
+                120
+            } as f32;
+            let div = measure.divisions as f32;
+            let seconds_per_div = 60.0 / (bpm * div);
 
-        for voice in &measure.notes {
-            let mut pos = 0u32;
-            for note in voice {
-                if note.amplitude < f32::EPSILON {
-                    pos += note.duration as u32;
-                    continue;
-                }
-
-                let start_s = pos as f32 * seconds_per_div;
-                let dur_s = note.duration as f32 * seconds_per_div;
-                let start_sample = measure_start_sample + (start_s * SAMPLE_RATE as f32) as usize;
-                let n = (dur_s * SAMPLE_RATE as f32) as usize;
-
-                let freq = note.frequency(measure.key, composition.temperament);
-                let fade = ((n as f32 * FADE_FRACTION) as usize).max(1);
-
-                for i in 0..n {
-                    let idx = start_sample + i;
-                    if idx >= buf.len() {
-                        break;
+            for voice in &measure.notes {
+                let mut pos = 0u32;
+                for note in voice {
+                    if note.is_rest() {
+                        pos += u32::from(note.duration);
+                        continue;
                     }
-                    let envelope = if i < fade {
-                        i as f32 / fade as f32
-                    } else if i >= n - fade {
-                        (n - i) as f32 / fade as f32
-                    } else {
-                        1.0
-                    };
-                    let t = i as f32 / SAMPLE_RATE as f32;
-                    buf[idx] += note.amplitude * envelope * (2.0 * PI * freq * t).sin();
+
+                    let start_s = pos as f32 * seconds_per_div;
+                    let dur_s = note.duration as f32 * seconds_per_div;
+                    let start_sample =
+                        measure_start_sample + (start_s * SAMPLE_RATE as f32) as usize;
+                    let n = (dur_s * SAMPLE_RATE as f32) as usize;
+
+                    let freq = note.frequency(measure.key, composition.temperament);
+                    let fade = ((n as f32 * FADE_FRACTION) as usize).max(1);
+
+                    for i in 0..n {
+                        let idx = start_sample + i;
+                        if idx >= buf.len() {
+                            break;
+                        }
+                        let envelope = if i < fade {
+                            i as f32 / fade as f32
+                        } else if i >= n - fade {
+                            (n - i) as f32 / fade as f32
+                        } else {
+                            1.0
+                        };
+                        let t = i as f32 / SAMPLE_RATE as f32;
+                        buf[idx] += note.amplitude * envelope * (2.0 * PI * freq * t).sin();
+                    }
+
+                    pos += u32::from(note.duration);
                 }
-
-                pos += note.duration as u32;
             }
-        }
 
-        let measure_divs = measure.divisions as u32 * 4 * measure.time_signature.numerator as u32
-            / measure.time_signature.denominator as u32;
-        measure_start_sample +=
-            (measure_divs as f32 * seconds_per_div * SAMPLE_RATE as f32).ceil() as usize;
+            let measure_divs = measure.total_divisions();
+            measure_start_sample +=
+                (measure_divs as f32 * seconds_per_div * SAMPLE_RATE as f32).ceil() as usize;
+        }
     }
 
     let peak = buf.iter().map(|s| s.abs()).fold(0f32, f32::max);

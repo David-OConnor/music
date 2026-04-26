@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InstrumentType {
     Plucked,
     Bowed,
@@ -8,7 +8,7 @@ pub enum InstrumentType {
     Voice,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Instrument {
     Piano,
     Guitar,

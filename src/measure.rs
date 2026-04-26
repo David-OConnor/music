@@ -24,12 +24,12 @@ pub struct Measure {
     /// Note: MIDI uses the concept of "pulses per quarter note". 96 is a historical default,
     /// and DAWS may default to 960. Higher means more precision.
     pub divisions: u16,
-    /// Outer: Voices. Inner: Notes in that voice. Voice indices must stay consistent
-    /// throughout the entire composition.
+    /// Outer: Voices. Inner: Notes in that voice. Voice indices should stay consistent
+    /// throughout a part.
     ///
     /// Voices are used to deconflict notes for displaying on sheet music. Notably comes up on
     /// piano and other multi-note instruments. Similar to the implementation in MusicXml.
-    pub notes: Vec<Vec<Vec<NotePlayed>>>,
+    pub notes: Vec<Vec<NotePlayed>>,
 }
 
 impl Measure {
@@ -44,6 +44,11 @@ impl Measure {
             divisions: 32,
             notes: Vec::new(),
         }
+    }
+
+    pub fn total_divisions(&self) -> u32 {
+        u32::from(self.divisions) * 4 * u32::from(self.time_signature.numerator)
+            / u32::from(self.time_signature.denominator)
     }
 }
 

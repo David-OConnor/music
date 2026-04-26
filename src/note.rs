@@ -285,11 +285,11 @@ pub struct NotePlayed {
     /// Which staff this note belongs to. `None` = single-staff instrument (no `<staff>` element
     /// emitted). `Some(1)` = treble, `Some(2)` = bass (grand-staff instruments like Piano).
     pub staff: Option<usize>,
-    // /// Used to deconflict notes for displaying on sheet music. Notably comes up on
-    // /// piano and other multi-note instruments. Similar to the implementation in MusicXml.
-    // ///
-    // /// This can remain at 0 if there is only one voice in the composition, measure etc.
-    // pub voice: usize,
+    /// Used to deconflict notes for displaying on sheet music. Notably comes up on
+    /// piano and other multi-note instruments. Similar to the implementation in MusicXml.
+    ///
+    /// This can remain at 0 if there is only one voice in the part.
+    pub voice: usize,
 }
 
 impl Display for NotePlayed {
@@ -393,6 +393,10 @@ impl NotePlayed {
                 tonic_freq * ratio
             }
         }
+    }
+
+    pub fn is_rest(&self) -> bool {
+        self.amplitude <= f32::EPSILON
     }
 }
 

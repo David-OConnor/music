@@ -7,17 +7,18 @@ use std::{
 };
 
 use crate::{
-    composition::{Composition, NotesStartingThisTick},
+    composition::Composition,
     instrument::Instrument,
     key_scale::{Key, MajorMinor, SharpFlat},
     measure::{Measure, TimeSignature},
-    note::{Note, NoteDurationGeneral, NoteLetter, NotePlayed},
+    note::{Note, NoteEngraving, NoteLetter, NotePlayed},
     overtones::Temperament,
 };
 
 #[derive(Clone, Debug)]
 struct TimedEvent {
     abs_tick: u32,
+    track: usize,
     priority: u8,
     seq: usize,
     kind: TimedEventKind,
@@ -54,6 +55,7 @@ enum TimedEventKind {
 struct ImportedNote {
     start_tick: u32,
     end_tick: u32,
+    track: usize,
     channel: u8,
     pitch: u8,
     velocity: u8,
@@ -65,6 +67,28 @@ struct ActiveNote {
     start_tick: u32,
     velocity: u8,
     program: Option<u8>,
+}
+
+#[derive(Clone, Debug)]
+struct AssignedImportedNote {
+    note: ImportedNote,
+    voice: usize,
+}
+
+#[derive(Clone)]
+struct MeasureSpan {
+    start_tick: u32,
+    end_tick: u32,
+    measure: Measure,
+}
+
+#[derive(Clone)]
+struct NoteSegment {
+    start_in_measure: u32,
+    duration: u32,
+    note: Note,
+    amplitude: f32,
+    voice: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -132,15 +156,21 @@ impl<'a> ByteReader<'a> {
     }
 }
 
-fn write_midi_header(ppq: u16, track_len: u32) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(14 + track_len as usize);
+fn write_smf_header(format: u16, track_count: u16, division: u16) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(14);
     bytes.extend_from_slice(b"MThd");
     bytes.extend_from_slice(&6_u32.to_be_bytes());
-    bytes.extend_from_slice(&0_u16.to_be_bytes());
-    bytes.extend_from_slice(&1_u16.to_be_bytes());
-    bytes.extend_from_slice(&ppq.to_be_bytes());
+    bytes.extend_from_slice(&format.to_be_bytes());
+    bytes.extend_from_slice(&track_count.to_be_bytes());
+    bytes.extend_from_slice(&division.to_be_bytes());
+    bytes
+}
+
+fn wrap_track(track_bytes: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(8 + track_bytes.len());
     bytes.extend_from_slice(b"MTrk");
-    bytes.extend_from_slice(&track_len.to_be_bytes());
+    bytes.extend_from_slice(&(track_bytes.len() as u32).to_be_bytes());
+    bytes.extend_from_slice(track_bytes);
     bytes
 }
 
@@ -396,36 +426,29 @@ fn lcm(a: u32, b: u32) -> u32 {
     }
 }
 
-fn ticks_per_measure(time_signature: TimeSignature, ticks_per_sixteenth: u32) -> u32 {
-    ticks_per_sixteenth * 16 * u32::from(time_signature.numerator)
-        / u32::from(time_signature.denominator)
+fn ticks_per_measure(time_signature: TimeSignature, ppq: u32) -> u32 {
+    ppq * 4 * u32::from(time_signature.numerator) / u32::from(time_signature.denominator)
 }
 
-fn denom_to_power(denominator: u8) -> io::Result<u8> {
-    if denominator == 0 || !denominator.is_power_of_two() {
+fn bpm_to_micros_per_quarter(bpm: u16) -> io::Result<u32> {
+    if bpm == 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("unsupported time signature denominator {denominator} for MIDI"),
+            "tempo must be greater than zero",
         ));
     }
-    Ok(denominator.trailing_zeros() as u8)
+    Ok((60_000_000_u32 / u32::from(bpm)).max(1))
 }
 
-fn tempo_to_micros_per_quarter(ms_per_tick: u32, ticks_per_quarter: u16) -> io::Result<u32> {
-    let micros = u64::from(ms_per_tick) * u64::from(ticks_per_quarter) * 1000;
-    if micros == 0 || micros > 0x00ff_ffff {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "tempo is outside the representable MIDI range",
-        ));
+fn micros_per_quarter_to_bpm(micros_per_quarter: u32) -> u16 {
+    if micros_per_quarter == 0 {
+        120
+    } else {
+        (60_000_000_u32 / micros_per_quarter)
+            .clamp(1, u32::from(u16::MAX))
+            .try_into()
+            .unwrap_or(120)
     }
-    Ok(micros as u32)
-}
-
-fn micros_per_quarter_to_ms_per_tick(micros_per_quarter: u32, quarter_ticks: u32) -> u32 {
-    let denom = u64::from(quarter_ticks) * 1000;
-    let rounded = (u64::from(micros_per_quarter) + denom / 2) / denom;
-    rounded.max(1) as u32
 }
 
 fn emit_event_payload(bytes: &mut Vec<u8>, event: &TimedEventKind) -> io::Result<()> {
@@ -446,12 +469,18 @@ fn emit_event_payload(bytes: &mut Vec<u8>, event: &TimedEventKind) -> io::Result
             numerator,
             denominator,
         } => {
+            if *denominator == 0 || !denominator.is_power_of_two() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("unsupported time signature denominator {denominator} for MIDI"),
+                ));
+            }
             bytes.extend_from_slice(&[
                 0xff,
                 0x58,
                 0x04,
                 *numerator,
-                denom_to_power(*denominator)?,
+                denominator.trailing_zeros() as u8,
                 24,
                 8,
             ]);
@@ -489,11 +518,13 @@ fn push_timed_event(
     events: &mut Vec<TimedEvent>,
     seq: &mut usize,
     abs_tick: u32,
+    track: usize,
     priority: u8,
     kind: TimedEventKind,
 ) {
     events.push(TimedEvent {
         abs_tick,
+        track,
         priority,
         seq: *seq,
         kind,
@@ -501,189 +532,12 @@ fn push_timed_event(
     *seq += 1;
 }
 
-fn push_default_meta_events(
-    comp: &Composition,
-    events: &mut Vec<TimedEvent>,
-    seq: &mut usize,
-    ticks_per_quarter: u16,
-) -> io::Result<()> {
-    push_timed_event(
-        events,
-        seq,
-        0,
-        0,
-        TimedEventKind::Tempo(tempo_to_micros_per_quarter(
-            comp.ms_per_tick,
-            ticks_per_quarter,
-        )?),
-    );
-    push_timed_event(
-        events,
-        seq,
-        0,
-        0,
-        TimedEventKind::KeySignature {
-            fifths: key_to_fifths(comp.key),
-            minor: comp.key.major_minor == MajorMinor::Minor,
-        },
-    );
-    push_timed_event(
-        events,
-        seq,
-        0,
-        0,
-        TimedEventKind::TimeSignature {
-            numerator: 4,
-            denominator: 4,
-        },
-    );
-    Ok(())
-}
-
-fn push_measure_meta_events(
-    comp: &Composition,
-    events: &mut Vec<TimedEvent>,
-    seq: &mut usize,
-    ticks_per_quarter: u16,
-) -> io::Result<()> {
-    if comp.measures_by_part.is_empty() {
-        return push_default_meta_events(comp, events, seq, ticks_per_quarter);
-    }
-
-    let mut tick = 0_u32;
-    let mut last_key = None;
-    let mut last_time_signature = None;
-    let mut last_ms_per_tick = None;
-
-    for measure in &comp.measures_by_part {
-        if last_key != Some(measure.key) {
-            push_timed_event(
-                events,
-                seq,
-                tick,
-                0,
-                TimedEventKind::KeySignature {
-                    fifths: key_to_fifths(measure.key),
-                    minor: measure.key.major_minor == MajorMinor::Minor,
-                },
-            );
-            last_key = Some(measure.key);
-        }
-
-        if last_time_signature != Some(measure.time_signature) {
-            push_timed_event(
-                events,
-                seq,
-                tick,
-                0,
-                TimedEventKind::TimeSignature {
-                    numerator: measure.time_signature.numerator,
-                    denominator: measure.time_signature.denominator,
-                },
-            );
-            last_time_signature = Some(measure.time_signature);
-        }
-
-        let measure_ms_per_tick = if measure.tempo == 0 {
-            comp.ms_per_tick
-        } else {
-            measure.tempo
-        };
-        if last_ms_per_tick != Some(measure_ms_per_tick) {
-            push_timed_event(
-                events,
-                seq,
-                tick,
-                0,
-                TimedEventKind::Tempo(tempo_to_micros_per_quarter(
-                    measure_ms_per_tick,
-                    ticks_per_quarter,
-                )?),
-            );
-            last_ms_per_tick = Some(measure_ms_per_tick);
-        }
-
-        tick = tick.saturating_add(ticks_per_measure(
-            measure.time_signature,
-            comp.ticks_per_sixteenth_note,
-        ));
-    }
-
-    Ok(())
-}
-
-fn composition_to_smf_bytes(comp: &Composition) -> io::Result<Vec<u8>> {
-    let ticks_per_quarter_u32 = comp
-        .ticks_per_sixteenth_note
-        .checked_mul(4)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "ticks-per-quarter overflow"))?;
-    let ticks_per_quarter = u16::try_from(ticks_per_quarter_u32).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "ticks-per-quarter exceeds MIDI header capacity",
-        )
-    })?;
-
-    let primary_instrument = comp
-        .instruments
-        .first()
-        .copied()
-        .unwrap_or(Instrument::Piano);
-    let channel = instrument_channel(primary_instrument);
-
-    let mut events = Vec::new();
-    let mut seq = 0_usize;
-
-    push_measure_meta_events(comp, &mut events, &mut seq, ticks_per_quarter)?;
-
-    if let Some(program) = instrument_to_program(primary_instrument) {
-        push_timed_event(
-            &mut events,
-            &mut seq,
-            0,
-            0,
-            TimedEventKind::ProgramChange { channel, program },
-        );
-    }
-
-    for (tick_idx, group) in comp.notes_by_tick.iter().enumerate() {
-        let start_tick = tick_idx as u32;
-        for note in &group.notes {
-            let duration = note.duration.get_ticks(comp.ticks_per_sixteenth_note)?;
-            let pitch = note_to_midi_pitch(&note.note, comp.key)?;
-            let velocity = amplitude_to_velocity(note.amplitude);
-            let end_tick = start_tick.saturating_add(duration);
-
-            push_timed_event(
-                &mut events,
-                &mut seq,
-                start_tick,
-                2,
-                TimedEventKind::NoteOn {
-                    channel,
-                    pitch,
-                    velocity,
-                },
-            );
-            push_timed_event(
-                &mut events,
-                &mut seq,
-                end_tick,
-                1,
-                TimedEventKind::NoteOff {
-                    channel,
-                    pitch,
-                    velocity: 64,
-                },
-            );
-        }
-    }
-
-    events.sort_by_key(|event| (event.abs_tick, event.priority, event.seq));
+fn serialize_track_events(events: &mut Vec<TimedEvent>) -> io::Result<Vec<u8>> {
+    events.sort_by_key(|event| (event.abs_tick, event.priority, event.track, event.seq));
 
     let mut track_bytes = Vec::new();
     let mut current_tick = 0_u32;
-    for event in &events {
+    for event in events.iter() {
         let delta = event.abs_tick.saturating_sub(current_tick);
         write_vlq(&mut track_bytes, delta);
         emit_event_payload(&mut track_bytes, &event.kind)?;
@@ -692,9 +546,249 @@ fn composition_to_smf_bytes(comp: &Composition) -> io::Result<Vec<u8>> {
 
     write_vlq(&mut track_bytes, 0);
     track_bytes.extend_from_slice(&[0xff, 0x2f, 0x00]);
+    Ok(track_bytes)
+}
 
-    let mut bytes = write_midi_header(ticks_per_quarter, track_bytes.len() as u32);
-    bytes.extend_from_slice(&track_bytes);
+fn all_measures(comp: &Composition) -> impl Iterator<Item = &Measure> {
+    comp.measures_by_part
+        .iter()
+        .flat_map(|(_, measures)| measures.iter())
+}
+
+fn choose_ppq(comp: &Composition) -> io::Result<u16> {
+    let ppq = all_measures(comp)
+        .map(|measure| u32::from(measure.divisions))
+        .fold(1_u32, lcm)
+        .max(1);
+
+    u16::try_from(ppq).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "combined measure divisions exceed MIDI header capacity",
+        )
+    })
+}
+
+fn scaled_ticks(raw_ticks: u32, measure_divisions: u16, ppq: u16) -> u32 {
+    raw_ticks * u32::from(ppq) / u32::from(measure_divisions)
+}
+
+fn reference_measures(comp: &Composition) -> Option<&[Measure]> {
+    comp.measures_by_part
+        .iter()
+        .find_map(|(_, measures)| (!measures.is_empty()).then_some(measures.as_slice()))
+}
+
+fn build_meta_track(comp: &Composition, ppq: u16) -> io::Result<Vec<TimedEvent>> {
+    let mut events = Vec::new();
+    let mut seq = 0_usize;
+
+    if let Some(measures) = reference_measures(comp) {
+        let mut tick = 0_u32;
+        let mut last_key = None;
+        let mut last_time_signature = None;
+        let mut last_tempo = None;
+
+        for measure in measures {
+            if last_key != Some(measure.key) {
+                push_timed_event(
+                    &mut events,
+                    &mut seq,
+                    tick,
+                    0,
+                    0,
+                    TimedEventKind::KeySignature {
+                        fifths: key_to_fifths(measure.key),
+                        minor: measure.key.major_minor == MajorMinor::Minor,
+                    },
+                );
+                last_key = Some(measure.key);
+            }
+
+            if last_time_signature != Some(measure.time_signature) {
+                push_timed_event(
+                    &mut events,
+                    &mut seq,
+                    tick,
+                    0,
+                    0,
+                    TimedEventKind::TimeSignature {
+                        numerator: measure.time_signature.numerator,
+                        denominator: measure.time_signature.denominator,
+                    },
+                );
+                last_time_signature = Some(measure.time_signature);
+            }
+
+            if last_tempo != Some(measure.tempo) {
+                push_timed_event(
+                    &mut events,
+                    &mut seq,
+                    tick,
+                    0,
+                    0,
+                    TimedEventKind::Tempo(bpm_to_micros_per_quarter(measure.tempo.max(1))?),
+                );
+                last_tempo = Some(measure.tempo);
+            }
+
+            tick = tick.saturating_add(scaled_ticks(
+                measure.total_divisions(),
+                measure.divisions,
+                ppq,
+            ));
+        }
+    } else {
+        push_timed_event(
+            &mut events,
+            &mut seq,
+            0,
+            0,
+            0,
+            TimedEventKind::Tempo(bpm_to_micros_per_quarter(120)?),
+        );
+        push_timed_event(
+            &mut events,
+            &mut seq,
+            0,
+            0,
+            0,
+            TimedEventKind::TimeSignature {
+                numerator: 4,
+                denominator: 4,
+            },
+        );
+        push_timed_event(
+            &mut events,
+            &mut seq,
+            0,
+            0,
+            0,
+            TimedEventKind::KeySignature {
+                fifths: 0,
+                minor: false,
+            },
+        );
+    }
+
+    Ok(events)
+}
+
+fn assign_channels(comp: &Composition) -> io::Result<Vec<u8>> {
+    let mut channels = Vec::with_capacity(comp.measures_by_part.len());
+    let mut next_channel = 0_u8;
+
+    for (instrument, _) in &comp.measures_by_part {
+        if *instrument == Instrument::Drums {
+            channels.push(9);
+            continue;
+        }
+
+        while next_channel == 9 || channels.contains(&next_channel) {
+            next_channel = next_channel.saturating_add(1);
+        }
+
+        if next_channel > 15 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "too many non-drum parts for distinct MIDI channels",
+            ));
+        }
+
+        channels.push(next_channel);
+        next_channel = next_channel.saturating_add(1);
+    }
+
+    Ok(channels)
+}
+
+fn build_part_track(
+    instr: Instrument,
+    measures: &[Measure],
+    channel: u8,
+    ppq: u16,
+) -> io::Result<Vec<TimedEvent>> {
+    let mut events = Vec::new();
+    let mut seq = 0_usize;
+
+    if let Some(program) = instrument_to_program(instr) {
+        push_timed_event(
+            &mut events,
+            &mut seq,
+            0,
+            0,
+            0,
+            TimedEventKind::ProgramChange { channel, program },
+        );
+    }
+
+    let mut measure_start = 0_u32;
+    for measure in measures {
+        for voice_notes in &measure.notes {
+            let mut voice_tick = measure_start;
+            for note in voice_notes {
+                let duration =
+                    scaled_ticks(u32::from(note.duration).max(1), measure.divisions, ppq);
+                if !note.is_rest() {
+                    let pitch = note_to_midi_pitch(&note.note, measure.key)?;
+                    let velocity = amplitude_to_velocity(note.amplitude);
+                    push_timed_event(
+                        &mut events,
+                        &mut seq,
+                        voice_tick,
+                        0,
+                        2,
+                        TimedEventKind::NoteOn {
+                            channel,
+                            pitch,
+                            velocity,
+                        },
+                    );
+                    push_timed_event(
+                        &mut events,
+                        &mut seq,
+                        voice_tick.saturating_add(duration),
+                        0,
+                        1,
+                        TimedEventKind::NoteOff {
+                            channel,
+                            pitch,
+                            velocity: 64,
+                        },
+                    );
+                }
+                voice_tick = voice_tick.saturating_add(duration);
+            }
+        }
+
+        measure_start = measure_start.saturating_add(scaled_ticks(
+            measure.total_divisions(),
+            measure.divisions,
+            ppq,
+        ));
+    }
+
+    Ok(events)
+}
+
+fn composition_to_smf_bytes(comp: &Composition) -> io::Result<Vec<u8>> {
+    let ppq = choose_ppq(comp)?;
+    let channels = assign_channels(comp)?;
+    let mut track_payloads = Vec::new();
+
+    let mut meta_events = build_meta_track(comp, ppq)?;
+    track_payloads.push(serialize_track_events(&mut meta_events)?);
+
+    for ((instrument, measures), channel) in comp.measures_by_part.iter().zip(channels) {
+        let mut part_events = build_part_track(*instrument, measures, channel, ppq)?;
+        track_payloads.push(serialize_track_events(&mut part_events)?);
+    }
+
+    let format = if track_payloads.len() > 1 { 1 } else { 0 };
+    let mut bytes = write_smf_header(format, track_payloads.len() as u16, ppq);
+    for track in &track_payloads {
+        bytes.extend_from_slice(&wrap_track(track));
+    }
     Ok(bytes)
 }
 
@@ -736,6 +830,7 @@ fn parse_header(bytes: &[u8]) -> io::Result<(Header, ByteReader<'_>)> {
 }
 
 fn parse_track_events(
+    track_index: usize,
     track_bytes: &[u8],
     seq: &mut usize,
     output: &mut Vec<TimedEvent>,
@@ -777,6 +872,7 @@ fn parse_track_events(
                     output,
                     seq,
                     abs_tick,
+                    track_index,
                     1,
                     TimedEventKind::NoteOff {
                         channel,
@@ -795,6 +891,7 @@ fn parse_track_events(
                         output,
                         seq,
                         abs_tick,
+                        track_index,
                         1,
                         TimedEventKind::NoteOff {
                             channel,
@@ -807,6 +904,7 @@ fn parse_track_events(
                         output,
                         seq,
                         abs_tick,
+                        track_index,
                         2,
                         TimedEventKind::NoteOn {
                             channel,
@@ -829,6 +927,7 @@ fn parse_track_events(
                     output,
                     seq,
                     abs_tick,
+                    track_index,
                     0,
                     TimedEventKind::ProgramChange { channel, program },
                 );
@@ -851,7 +950,14 @@ fn parse_track_events(
                         let micros = (u32::from(body[0]) << 16)
                             | (u32::from(body[1]) << 8)
                             | u32::from(body[2]);
-                        push_timed_event(output, seq, abs_tick, 0, TimedEventKind::Tempo(micros));
+                        push_timed_event(
+                            output,
+                            seq,
+                            abs_tick,
+                            track_index,
+                            0,
+                            TimedEventKind::Tempo(micros),
+                        );
                     }
                     0x58 if body.len() >= 2 => {
                         let numerator = body[0];
@@ -861,6 +967,7 @@ fn parse_track_events(
                                 output,
                                 seq,
                                 abs_tick,
+                                track_index,
                                 0,
                                 TimedEventKind::TimeSignature {
                                     numerator,
@@ -876,6 +983,7 @@ fn parse_track_events(
                             output,
                             seq,
                             abs_tick,
+                            track_index,
                             0,
                             TimedEventKind::KeySignature { fifths, minor },
                         );
@@ -903,7 +1011,7 @@ fn parse_track_chunks(
     let mut events = Vec::new();
     let mut seq = 0_usize;
 
-    for _ in 0..header.track_count {
+    for track_index in 0..header.track_count as usize {
         if reader.read_exact(4)? != b"MTrk" {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -912,7 +1020,7 @@ fn parse_track_chunks(
         }
         let track_len = reader.read_u32_be()? as usize;
         let track_bytes = reader.read_exact(track_len)?;
-        parse_track_events(track_bytes, &mut seq, &mut events)?;
+        parse_track_events(track_index, track_bytes, &mut seq, &mut events)?;
     }
 
     if reader.pos != bytes.len() {
@@ -933,21 +1041,21 @@ fn current_meta_value<T: Copy>(states: &[MetaState<T>], tick: u32, default: T) -
     current
 }
 
-fn build_measures(
+fn build_measure_spans(
     total_ticks: u32,
-    ticks_per_sixteenth: u32,
+    ppq: u16,
     key_changes: &[MetaState<Key>],
     time_signature_changes: &[MetaState<TimeSignature>],
-    tempo_changes: &[MetaState<u32>],
+    tempo_changes: &[MetaState<u16>],
     default_key: Key,
     default_time_signature: TimeSignature,
-    default_ms_per_tick: u32,
-) -> Vec<Measure> {
+    default_tempo: u16,
+) -> Vec<MeasureSpan> {
     if total_ticks == 0 {
         return Vec::new();
     }
 
-    let mut measures = Vec::new();
+    let mut spans = Vec::new();
     let mut measure_start = 0_u32;
 
     while measure_start < total_ticks {
@@ -957,14 +1065,173 @@ fn build_measures(
             measure_start,
             default_time_signature,
         );
-        let ms_per_tick = current_meta_value(tempo_changes, measure_start, default_ms_per_tick);
-        let measure_len = ticks_per_measure(time_signature, ticks_per_sixteenth).max(1);
+        let tempo = current_meta_value(tempo_changes, measure_start, default_tempo);
+        let measure_len = ticks_per_measure(time_signature, u32::from(ppq)).max(1);
 
-        measures.push(Measure::new(key, time_signature, None, ms_per_tick));
+        let mut measure = Measure::new(key, time_signature, None, tempo);
+        measure.divisions = ppq;
+
+        spans.push(MeasureSpan {
+            start_tick: measure_start,
+            end_tick: measure_start.saturating_add(measure_len),
+            measure,
+        });
         measure_start = measure_start.saturating_add(measure_len);
     }
 
-    measures
+    spans
+}
+
+fn assign_voices(notes: &mut [ImportedNote]) -> Vec<AssignedImportedNote> {
+    notes.sort_by_key(|note| (note.start_tick, note.end_tick, note.pitch));
+
+    let mut voice_end_ticks: Vec<u32> = Vec::new();
+    let mut assigned = Vec::with_capacity(notes.len());
+
+    for note in notes.iter().cloned() {
+        let mut voice = None;
+        for (idx, end_tick) in voice_end_ticks.iter_mut().enumerate() {
+            if note.start_tick >= *end_tick {
+                *end_tick = note.end_tick;
+                voice = Some(idx);
+                break;
+            }
+        }
+
+        let voice = voice.unwrap_or_else(|| {
+            voice_end_ticks.push(note.end_tick);
+            voice_end_ticks.len() - 1
+        });
+
+        assigned.push(AssignedImportedNote { note, voice });
+    }
+
+    assigned
+}
+
+fn find_measure_index(spans: &[MeasureSpan], tick: u32) -> Option<usize> {
+    spans.iter().position(|span| tick < span.end_tick)
+}
+
+fn split_note_segments(
+    assigned_note: &AssignedImportedNote,
+    spans: &[MeasureSpan],
+    key_changes: &[MetaState<Key>],
+    default_key: Key,
+) -> Vec<(usize, NoteSegment)> {
+    let mut segments = Vec::new();
+    let mut segment_start = assigned_note.note.start_tick;
+    let note_end = assigned_note.note.end_tick.max(segment_start + 1);
+
+    while segment_start < note_end {
+        let Some(measure_idx) = find_measure_index(spans, segment_start) else {
+            break;
+        };
+        let span = &spans[measure_idx];
+        let segment_end = note_end.min(span.end_tick);
+        let duration = segment_end.saturating_sub(segment_start);
+        let key = current_meta_value(key_changes, assigned_note.note.start_tick, default_key);
+
+        segments.push((
+            measure_idx,
+            NoteSegment {
+                start_in_measure: segment_start.saturating_sub(span.start_tick),
+                duration,
+                note: midi_pitch_to_note(assigned_note.note.pitch, key),
+                amplitude: velocity_to_amplitude(assigned_note.note.velocity),
+                voice: assigned_note.voice,
+            },
+        ));
+
+        segment_start = segment_end;
+    }
+
+    segments
+}
+
+fn rest_note(duration: u32, divisions: u16, voice: usize) -> NotePlayed {
+    let duration_u16 = duration.min(u32::from(u16::MAX)) as u16;
+    NotePlayed {
+        note: Note::new(NoteLetter::C, None, 4),
+        engraving: NoteEngraving::from_duration_ticks(duration_u16, divisions),
+        duration: duration_u16,
+        amplitude: 0.0,
+        staff: None,
+        voice,
+    }
+}
+
+fn sounded_note(segment: &NoteSegment, divisions: u16) -> NotePlayed {
+    let duration_u16 = segment.duration.min(u32::from(u16::MAX)) as u16;
+    NotePlayed {
+        note: segment.note.clone(),
+        engraving: NoteEngraving::from_duration_ticks(duration_u16, divisions),
+        duration: duration_u16,
+        amplitude: segment.amplitude,
+        staff: None,
+        voice: segment.voice,
+    }
+}
+
+fn build_part_measures(
+    assigned_notes: &[AssignedImportedNote],
+    spans: &[MeasureSpan],
+    key_changes: &[MetaState<Key>],
+    default_key: Key,
+) -> Vec<Measure> {
+    if spans.is_empty() {
+        return Vec::new();
+    }
+
+    let voice_count = assigned_notes
+        .iter()
+        .map(|note| note.voice + 1)
+        .max()
+        .unwrap_or(0);
+
+    let mut segment_grid: Vec<Vec<Vec<NoteSegment>>> = spans
+        .iter()
+        .map(|_| vec![Vec::new(); voice_count])
+        .collect();
+
+    for assigned_note in assigned_notes {
+        for (measure_idx, segment) in
+            split_note_segments(assigned_note, spans, key_changes, default_key)
+        {
+            segment_grid[measure_idx][segment.voice].push(segment);
+        }
+    }
+
+    spans
+        .iter()
+        .enumerate()
+        .map(|(measure_idx, span)| {
+            let mut measure = span.measure.clone();
+            let mut voices = vec![Vec::new(); voice_count];
+
+            for voice_idx in 0..voice_count {
+                let mut segments = segment_grid[measure_idx][voice_idx].clone();
+                segments.sort_by_key(|segment| (segment.start_in_measure, segment.duration));
+
+                let mut cursor = 0_u32;
+                for segment in segments {
+                    if segment.start_in_measure > cursor {
+                        voices[voice_idx].push(rest_note(
+                            segment.start_in_measure - cursor,
+                            measure.divisions,
+                            voice_idx,
+                        ));
+                    }
+
+                    voices[voice_idx].push(sounded_note(&segment, measure.divisions));
+                    cursor = segment.start_in_measure.saturating_add(segment.duration);
+                }
+            }
+
+            measure.notes = voices;
+            measure
+        })
+        .collect()
 }
 
 fn parse_smf(bytes: &[u8]) -> io::Result<Composition> {
@@ -982,20 +1249,16 @@ fn parse_smf(bytes: &[u8]) -> io::Result<Composition> {
         ));
     }
 
-    let division = u32::from(header.division);
-    let quarter_ticks = lcm(division, 4);
-    let ticks_per_sixteenth = (quarter_ticks / 4).max(1);
-    let tick_scale = (quarter_ticks / division).max(1);
-
+    let ppq = header.division.max(1);
     let mut events = parse_track_chunks(bytes, header, &mut reader)?;
-    events.sort_by_key(|event| (event.abs_tick, event.priority, event.seq));
+    events.sort_by_key(|event| (event.abs_tick, event.priority, event.track, event.seq));
 
     let default_key = Key::new(NoteLetter::C, SharpFlat::Natural, MajorMinor::Major);
     let default_time_signature = TimeSignature::new(4, 4);
-    let default_micros_per_quarter = 500_000_u32;
+    let default_tempo = 120_u16;
 
-    let mut current_programs = [None; 16];
-    let mut active_notes: HashMap<(u8, u8), VecDeque<ActiveNote>> = HashMap::new();
+    let mut current_programs: HashMap<(usize, u8), Option<u8>> = HashMap::new();
+    let mut active_notes: HashMap<(usize, u8, u8), VecDeque<ActiveNote>> = HashMap::new();
     let mut imported_notes = Vec::new();
     let mut tempo_changes = Vec::new();
     let mut time_signature_changes = Vec::new();
@@ -1006,12 +1269,12 @@ fn parse_smf(bytes: &[u8]) -> io::Result<Composition> {
         max_tick_seen = max_tick_seen.max(event.abs_tick);
         match event.kind {
             TimedEventKind::ProgramChange { channel, program } => {
-                current_programs[channel as usize] = Some(program);
+                current_programs.insert((event.track, channel), Some(program));
             }
             TimedEventKind::Tempo(micros_per_quarter) => {
                 tempo_changes.push(MetaState {
-                    tick: event.abs_tick.saturating_mul(tick_scale),
-                    value: micros_per_quarter_to_ms_per_tick(micros_per_quarter, quarter_ticks),
+                    tick: event.abs_tick,
+                    value: micros_per_quarter_to_bpm(micros_per_quarter),
                 });
             }
             TimedEventKind::TimeSignature {
@@ -1019,13 +1282,13 @@ fn parse_smf(bytes: &[u8]) -> io::Result<Composition> {
                 denominator,
             } => {
                 time_signature_changes.push(MetaState {
-                    tick: event.abs_tick.saturating_mul(tick_scale),
+                    tick: event.abs_tick,
                     value: TimeSignature::new(numerator, denominator),
                 });
             }
             TimedEventKind::KeySignature { fifths, minor } => {
                 key_changes.push(MetaState {
-                    tick: event.abs_tick.saturating_mul(tick_scale),
+                    tick: event.abs_tick,
                     value: fifths_to_key(
                         fifths,
                         if minor {
@@ -1042,20 +1305,24 @@ fn parse_smf(bytes: &[u8]) -> io::Result<Composition> {
                 velocity,
             } => {
                 active_notes
-                    .entry((channel, pitch))
+                    .entry((event.track, channel, pitch))
                     .or_default()
                     .push_back(ActiveNote {
                         start_tick: event.abs_tick,
                         velocity,
-                        program: current_programs[channel as usize],
+                        program: current_programs
+                            .get(&(event.track, channel))
+                            .copied()
+                            .unwrap_or(None),
                     });
             }
             TimedEventKind::NoteOff { channel, pitch, .. } => {
-                if let Some(queue) = active_notes.get_mut(&(channel, pitch)) {
+                if let Some(queue) = active_notes.get_mut(&(event.track, channel, pitch)) {
                     if let Some(active_note) = queue.pop_front() {
                         imported_notes.push(ImportedNote {
-                            start_tick: active_note.start_tick.saturating_mul(tick_scale),
-                            end_tick: event.abs_tick.saturating_mul(tick_scale),
+                            start_tick: active_note.start_tick,
+                            end_tick: event.abs_tick.max(active_note.start_tick + 1),
+                            track: event.track,
                             channel,
                             pitch,
                             velocity: active_note.velocity,
@@ -1063,20 +1330,19 @@ fn parse_smf(bytes: &[u8]) -> io::Result<Composition> {
                         });
                     }
                     if queue.is_empty() {
-                        active_notes.remove(&(channel, pitch));
+                        active_notes.remove(&(event.track, channel, pitch));
                     }
                 }
             }
         }
     }
 
-    for ((channel, pitch), mut queue) in active_notes {
+    for ((track, channel, pitch), mut queue) in active_notes {
         while let Some(active_note) = queue.pop_front() {
             imported_notes.push(ImportedNote {
-                start_tick: active_note.start_tick.saturating_mul(tick_scale),
-                end_tick: max_tick_seen
-                    .max(active_note.start_tick + 1)
-                    .saturating_mul(tick_scale),
+                start_tick: active_note.start_tick,
+                end_tick: max_tick_seen.max(active_note.start_tick + 1),
+                track,
                 channel,
                 pitch,
                 velocity: active_note.velocity,
@@ -1085,73 +1351,45 @@ fn parse_smf(bytes: &[u8]) -> io::Result<Composition> {
         }
     }
 
-    imported_notes.sort_by_key(|note| (note.start_tick, note.pitch, note.channel));
-
-    let key = key_changes
-        .first()
-        .map(|state| state.value)
-        .unwrap_or(default_key);
-    let ms_per_tick = tempo_changes
-        .first()
-        .map(|state| state.value)
-        .unwrap_or_else(|| {
-            micros_per_quarter_to_ms_per_tick(default_micros_per_quarter, quarter_ticks)
-        });
-
-    let mut instruments = Vec::new();
-    for note in &imported_notes {
-        let instrument = program_to_instrument(note.program.unwrap_or(0), note.channel);
-        if !instruments.contains(&instrument) {
-            instruments.push(instrument);
-        }
-    }
-    if instruments.is_empty() {
-        instruments.push(Instrument::Piano);
-    }
-
-    let mut composition = Composition::new(
-        ticks_per_sixteenth,
-        ms_per_tick,
-        key,
-        Temperament::Even,
-        instruments,
-    );
-
-    let mut last_note_end = 0_u32;
-    for note in imported_notes {
-        let active_key = current_meta_value(&key_changes, note.start_tick, key);
-        let duration = note.end_tick.saturating_sub(note.start_tick).max(1);
-        let start_tick = note.start_tick as usize;
-        while composition.notes_by_tick.len() <= start_tick {
-            composition
-                .notes_by_tick
-                .push(NotesStartingThisTick::empty());
-        }
-
-        composition.notes_by_tick[start_tick]
-            .notes
-            .push(NotePlayed {
-                note: midi_pitch_to_note(note.pitch, active_key),
-                engraving: NoteDurationGeneral::Ticks(duration),
-                amplitude: velocity_to_amplitude(note.velocity),
-                staff: None,
-                voice: None,
-            });
-        last_note_end = last_note_end.max(note.end_tick);
-    }
-
-    composition.measures_by_part = build_measures(
-        last_note_end,
-        ticks_per_sixteenth,
+    let spans = build_measure_spans(
+        imported_notes
+            .iter()
+            .map(|note| note.end_tick)
+            .max()
+            .unwrap_or(0),
+        ppq,
         &key_changes,
         &time_signature_changes,
         &tempo_changes,
-        key,
+        default_key,
         default_time_signature,
-        ms_per_tick,
+        default_tempo,
     );
 
-    Ok(composition)
+    let mut comp = Composition::new(Temperament::Even, vec![]);
+    let mut part_order: Vec<(usize, u8, Option<u8>)> = Vec::new();
+    let mut part_notes: HashMap<(usize, u8, Option<u8>), Vec<ImportedNote>> = HashMap::new();
+
+    imported_notes.sort_by_key(|note| (note.track, note.start_tick, note.pitch, note.channel));
+    for note in imported_notes {
+        let part_key = (note.track, note.channel, note.program);
+        if !part_notes.contains_key(&part_key) {
+            part_order.push(part_key);
+        }
+        part_notes.entry(part_key).or_default().push(note);
+    }
+
+    for (track, channel, program) in part_order {
+        let instrument = program_to_instrument(program.unwrap_or(0), channel);
+        let mut notes = part_notes
+            .remove(&(track, channel, program))
+            .unwrap_or_default();
+        let assigned_notes = assign_voices(&mut notes);
+        let measures = build_part_measures(&assigned_notes, &spans, &key_changes, default_key);
+        comp.measures_by_part.push((instrument, measures));
+    }
+
+    Ok(comp)
 }
 
 pub fn write_midi(comp: &Composition, path: &Path) -> io::Result<()> {
@@ -1168,90 +1406,86 @@ pub fn read_midi(path: &Path) -> io::Result<Composition> {
 mod tests {
     use super::{composition_to_smf_bytes, parse_smf};
     use crate::{
-        composition::{Composition, NotesStartingThisTick},
+        composition::Composition,
         instrument::Instrument,
         key_scale::{Key, MajorMinor, SharpFlat},
         measure::{Measure, TimeSignature},
-        note::{Note, NoteDurationGeneral, NoteLetter, NotePlayed},
+        note::{Note, NoteEngraving, NoteLetter, NotePlayed},
         overtones::Temperament,
     };
 
-    fn push_note(
-        comp: &mut Composition,
-        tick: usize,
-        note: Note,
-        duration: NoteDurationGeneral,
-        amplitude: f32,
-    ) {
-        while comp.notes_by_tick.len() <= tick {
-            comp.notes_by_tick.push(NotesStartingThisTick::empty());
-        }
-        comp.notes_by_tick[tick].notes.push(NotePlayed {
-            note,
-            engraving: duration,
-            amplitude,
+    fn note(
+        letter: NoteLetter,
+        sharp_flat: Option<SharpFlat>,
+        octave: u8,
+        engraving: NoteEngraving,
+        divisions: u16,
+        voice: usize,
+    ) -> NotePlayed {
+        NotePlayed {
+            note: Note::new(letter, sharp_flat, octave),
+            engraving,
+            duration: engraving.to_duration_ticks(divisions),
+            amplitude: 0.8,
             staff: None,
-            voice: None,
-        });
+            voice,
+        }
     }
 
     #[test]
-    fn midi_round_trip_preserves_basic_composition_data() {
+    fn midi_round_trip_preserves_parts_and_note_durations() {
         let key = Key::new(NoteLetter::G, SharpFlat::Natural, MajorMinor::Major);
-        let mut comp = Composition::new(1, 125, key, Temperament::Even, vec![Instrument::Guitar]);
-        comp.measures_by_part = vec![
-            Measure::new(key, TimeSignature::new(4, 4), None, 125),
-            Measure::new(key, TimeSignature::new(4, 4), None, 125),
-        ];
+        let mut guitar_measure = Measure::new(key, TimeSignature::new(4, 4), None, 120);
+        guitar_measure.divisions = 4;
+        guitar_measure.notes = vec![vec![
+            note(
+                NoteLetter::G,
+                Some(SharpFlat::Natural),
+                4,
+                NoteEngraving::Quarter,
+                4,
+                0,
+            ),
+            note(NoteLetter::F, None, 4, NoteEngraving::Quarter, 4, 0),
+        ]];
 
-        push_note(
-            &mut comp,
-            0,
-            Note::new(NoteLetter::G, Some(SharpFlat::Natural), 4),
-            NoteDurationGeneral::Traditional(crate::note::NoteEngraving::Quarter),
-            0.75,
-        );
-        push_note(
-            &mut comp,
+        let mut bass_measure = Measure::new(key, TimeSignature::new(4, 4), None, 120);
+        bass_measure.divisions = 4;
+        bass_measure.notes = vec![vec![note(
+            NoteLetter::D,
+            Some(SharpFlat::Natural),
+            3,
+            NoteEngraving::Half,
             4,
-            Note::new(NoteLetter::F, None, 4),
-            NoteDurationGeneral::Traditional(crate::note::NoteEngraving::Quarter),
-            0.5,
-        );
-        push_note(
-            &mut comp,
-            8,
-            Note::new(NoteLetter::D, Some(SharpFlat::Natural), 5),
-            NoteDurationGeneral::Ticks(2),
-            0.9,
-        );
+            0,
+        )]];
+
+        let comp = Composition {
+            metadata: Default::default(),
+            measures_by_part: vec![
+                (Instrument::Guitar, vec![guitar_measure]),
+                (Instrument::BassGuitar, vec![bass_measure]),
+            ],
+            temperament: Temperament::Even,
+        };
 
         let bytes = composition_to_smf_bytes(&comp).unwrap();
         let parsed = parse_smf(&bytes).unwrap();
 
-        assert_eq!(parsed.ticks_per_sixteenth_note, 1);
-        assert_eq!(parsed.ms_per_tick, 125);
-        assert_eq!(parsed.key, key);
-        assert_eq!(parsed.instruments.len(), 1);
-        assert!(parsed.instruments[0] == Instrument::Guitar);
-        assert_eq!(parsed.measures_by_part.len(), 1);
+        assert_eq!(parsed.measures_by_part.len(), 2);
+        assert_eq!(parsed.measures_by_part[0].0, Instrument::Guitar);
+        assert_eq!(parsed.measures_by_part[1].0, Instrument::BassGuitar);
 
-        assert_eq!(parsed.notes_by_tick[0].notes.len(), 1);
-        assert_eq!(parsed.notes_by_tick[0].notes[0].note.letter, NoteLetter::G);
-        assert_eq!(
-            parsed.notes_by_tick[0].notes[0].duration,
-            NoteDurationGeneral::Ticks(4)
-        );
+        let guitar_notes = &parsed.measures_by_part[0].1[0].notes[0];
+        assert_eq!(guitar_notes.len(), 2);
+        assert_eq!(guitar_notes[0].note.letter, NoteLetter::G);
+        assert_eq!(guitar_notes[0].duration, 4);
+        assert_eq!(guitar_notes[1].note.sharp_flat, Some(SharpFlat::Sharp));
 
-        assert_eq!(parsed.notes_by_tick[4].notes[0].note.letter, NoteLetter::F);
-        assert_eq!(
-            parsed.notes_by_tick[4].notes[0].note.sharp_flat,
-            Some(SharpFlat::Sharp)
-        );
-        assert_eq!(
-            parsed.notes_by_tick[8].notes[0].duration,
-            NoteDurationGeneral::Ticks(2)
-        );
+        let bass_notes = &parsed.measures_by_part[1].1[0].notes[0];
+        assert_eq!(bass_notes.len(), 1);
+        assert_eq!(bass_notes[0].note.letter, NoteLetter::D);
+        assert_eq!(bass_notes[0].duration, 8);
     }
 
     #[test]
@@ -1275,14 +1509,11 @@ mod tests {
 
         let comp = parse_smf(&bytes).unwrap();
 
-        assert_eq!(comp.ticks_per_sixteenth_note, 1);
-        assert_eq!(comp.ms_per_tick, 125);
-        assert_eq!(comp.notes_by_tick.len(), 1);
-        assert_eq!(comp.notes_by_tick[0].notes.len(), 1);
-        assert_eq!(comp.notes_by_tick[0].notes[0].note.letter, NoteLetter::C);
-        assert_eq!(
-            comp.notes_by_tick[0].notes[0].duration,
-            NoteDurationGeneral::Ticks(4)
-        );
+        assert_eq!(comp.measures_by_part.len(), 1);
+        let measure = &comp.measures_by_part[0].1[0];
+        assert_eq!(measure.divisions, 4);
+        assert_eq!(measure.tempo, 120);
+        assert_eq!(measure.notes[0][0].note.letter, NoteLetter::C);
+        assert_eq!(measure.notes[0][0].duration, 4);
     }
 }
