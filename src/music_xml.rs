@@ -552,6 +552,7 @@ fn make_pitch_note(
     note_divs: u32,
     staff_num: Option<u8>,
     voice: &str,
+    is_chord_tone: bool,
 ) -> mx::Note {
     let (type_val, dotted) = (
         duration_class_to_type_value(note.engraving),
@@ -569,7 +570,14 @@ fn make_pitch_note(
         attributes: mx::NoteAttributes::default(),
         content: mx::NoteContents {
             info: mx::NoteType::Normal(mx::NormalInfo {
-                chord: None,
+                chord: if is_chord_tone {
+                    Some(mx::Chord {
+                        attributes: (),
+                        content: (),
+                    })
+                } else {
+                    None
+                },
                 audible: mx::AudibleType::Pitch(mx::Pitch {
                     attributes: (),
                     content: mx::PitchContents {
@@ -618,6 +626,176 @@ fn make_pitch_note(
             listen: None,
         },
     }
+}
+
+#[derive(Clone)]
+struct PositionedNote {
+    start: u32,
+    note: NotePlayed,
+}
+
+#[derive(Clone)]
+struct ChordGroup {
+    start: u32,
+    duration: u32,
+    notes: Vec<NotePlayed>,
+}
+
+fn measure_written_voices(measure: &Measure) -> Vec<(usize, Vec<ChordGroup>)> {
+    let mut logical_voice_order: Vec<usize> = Vec::new();
+    let mut logical_voice_events: Vec<Vec<PositionedNote>> = Vec::new();
+
+    for (storage_voice_idx, voice_notes) in measure.notes.iter().enumerate() {
+        let logical_voice = voice_notes
+            .iter()
+            .find(|note| !note.is_rest())
+            .map(|note| note.voice)
+            .unwrap_or(storage_voice_idx);
+
+        let logical_voice_idx = if let Some(existing_idx) =
+            logical_voice_order.iter().position(|v| *v == logical_voice)
+        {
+            existing_idx
+        } else {
+            logical_voice_order.push(logical_voice);
+            logical_voice_events.push(Vec::new());
+            logical_voice_order.len() - 1
+        };
+
+        let mut pos = 0_u32;
+        for note in voice_notes {
+            if !note.is_rest() {
+                logical_voice_events[logical_voice_idx].push(PositionedNote {
+                    start: pos,
+                    note: note.clone(),
+                });
+            }
+            pos += u32::from(note.duration);
+        }
+    }
+
+    logical_voice_order
+        .into_iter()
+        .zip(logical_voice_events)
+        .filter_map(|(logical_voice, mut events)| {
+            if events.is_empty() {
+                return None;
+            }
+
+            events.sort_by_key(|event| event.start);
+
+            let mut groups = Vec::new();
+            let mut idx = 0;
+            while idx < events.len() {
+                let start = events[idx].start;
+                let mut duration = 0_u32;
+                let mut notes = Vec::new();
+
+                while idx < events.len() && events[idx].start == start {
+                    duration = duration.max(u32::from(events[idx].note.duration));
+                    notes.push(events[idx].note.clone());
+                    idx += 1;
+                }
+
+                groups.push(ChordGroup {
+                    start,
+                    duration,
+                    notes,
+                });
+            }
+
+            Some((logical_voice, groups))
+        })
+        .collect()
+}
+
+#[derive(Clone)]
+struct ParsedMeasureNote {
+    start: u32,
+    note: NotePlayed,
+}
+
+fn add_parsed_voice(
+    voice_order: &mut Vec<String>,
+    parsed_voice_events: &mut Vec<Vec<ParsedMeasureNote>>,
+    voice_name: &str,
+) -> usize {
+    if let Some(idx) = voice_order
+        .iter()
+        .position(|existing| existing == voice_name)
+    {
+        idx
+    } else {
+        voice_order.push(voice_name.to_string());
+        parsed_voice_events.push(Vec::new());
+        voice_order.len() - 1
+    }
+}
+
+fn rest_note_for_gap(
+    duration: u16,
+    voice: usize,
+    staff: Option<usize>,
+    divisions: u16,
+) -> NotePlayed {
+    NotePlayed {
+        note: Note::new(NoteLetter::C, None, 0),
+        engraving: NoteEngraving::from_duration_ticks(duration, divisions),
+        duration,
+        amplitude: 0.0,
+        staff,
+        voice,
+    }
+}
+
+fn build_storage_voices_from_parsed(
+    mut parsed_voice_events: Vec<Vec<ParsedMeasureNote>>,
+    divisions: u16,
+) -> Vec<Vec<NotePlayed>> {
+    let mut voice_data = Vec::new();
+
+    for (logical_voice, events) in parsed_voice_events.iter_mut().enumerate() {
+        events.sort_by_key(|event| event.start);
+
+        let mut stream_ends: Vec<u32> = Vec::new();
+        let mut streams: Vec<Vec<ParsedMeasureNote>> = Vec::new();
+
+        for event in events.iter().cloned() {
+            if let Some(stream_idx) = stream_ends.iter().position(|end| event.start >= *end) {
+                stream_ends[stream_idx] = event.start + u32::from(event.note.duration);
+                streams[stream_idx].push(event);
+            } else {
+                stream_ends.push(event.start + u32::from(event.note.duration));
+                streams.push(vec![event]);
+            }
+        }
+
+        for stream in streams {
+            let mut storage_voice = Vec::new();
+            let mut cursor = 0_u32;
+
+            for event in stream {
+                if event.start > cursor {
+                    let gap = (event.start - cursor).min(u32::from(u16::MAX)) as u16;
+                    storage_voice.push(rest_note_for_gap(
+                        gap,
+                        logical_voice,
+                        event.note.staff,
+                        divisions,
+                    ));
+                }
+
+                cursor = event.start + u32::from(event.note.duration);
+                storage_voice.push(event.note);
+            }
+
+            if !storage_voice.is_empty() {
+                voice_data.push(storage_voice);
+            }
+        }
+    }
+
+    voice_data
 }
 
 // --- Attributes builder ---
@@ -835,19 +1013,17 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
                 }
 
                 let measure_total_divs = measure.total_divisions();
-                let non_empty_voices: Vec<&Vec<NotePlayed>> = measure
-                    .notes
-                    .iter()
-                    .filter(|voice| !voice.is_empty())
-                    .collect();
+                let written_voices = measure_written_voices(measure);
 
-                if non_empty_voices.is_empty() {
+                if written_voices.is_empty() {
                     let staff_num = if grand { Some(1u8) } else { None };
                     for rest in fill_rests(measure_total_divs, dpq, staff_num, "1") {
                         measure_content.push(mx::MeasureElement::Note(rest));
                     }
                 } else {
-                    for (written_voice_idx, voice_notes) in non_empty_voices.iter().enumerate() {
+                    for (written_voice_idx, (logical_voice, chord_groups)) in
+                        written_voices.iter().enumerate()
+                    {
                         if written_voice_idx > 0 {
                             measure_content.push(mx::MeasureElement::Backup(mx::Backup {
                                 attributes: (),
@@ -862,13 +1038,11 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
                             }));
                         }
 
-                        let voice_label = voice_notes
-                            .first()
-                            .map(|note| (note.voice + 1).to_string())
-                            .unwrap_or_else(|| (written_voice_idx + 1).to_string());
+                        let voice_label = (logical_voice + 1).to_string();
                         let staff_num = if grand {
-                            voice_notes
+                            chord_groups
                                 .iter()
+                                .flat_map(|group| group.notes.iter())
                                 .find_map(|note| note.staff)
                                 .map(|staff| staff as u8)
                                 .or(Some((written_voice_idx.min(1) + 1) as u8))
@@ -876,21 +1050,32 @@ fn composition_to_score(comp: &Composition) -> mx::ScorePartwise {
                             None
                         };
 
-                        let mut filled = 0_u32;
-                        for note in *voice_notes {
-                            let note_divs = u32::from(note.duration);
-                            let note_element = if note.is_rest() {
-                                make_rest(note_divs, dpq, staff_num, &voice_label)
-                            } else {
-                                make_pitch_note(note, note_divs, staff_num, &voice_label)
-                            };
-                            measure_content.push(mx::MeasureElement::Note(note_element));
-                            filled += note_divs;
+                        let mut cursor = 0_u32;
+                        for group in chord_groups {
+                            if group.start > cursor {
+                                for rest in
+                                    fill_rests(group.start - cursor, dpq, staff_num, &voice_label)
+                                {
+                                    measure_content.push(mx::MeasureElement::Note(rest));
+                                }
+                            }
+
+                            for (note_idx, note) in group.notes.iter().enumerate() {
+                                measure_content.push(mx::MeasureElement::Note(make_pitch_note(
+                                    note,
+                                    u32::from(note.duration),
+                                    staff_num,
+                                    &voice_label,
+                                    note_idx > 0,
+                                )));
+                            }
+
+                            cursor = group.start + group.duration;
                         }
 
-                        if filled < measure_total_divs {
+                        if cursor < measure_total_divs {
                             for rest in fill_rests(
-                                measure_total_divs - filled,
+                                measure_total_divs - cursor,
                                 dpq,
                                 staff_num,
                                 &voice_label,
@@ -982,9 +1167,11 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                 continue;
             };
 
-            let mut voice_data: Vec<Vec<NotePlayed>> = vec![Vec::new(); voice_order.len()];
+            let mut parsed_voice_events: Vec<Vec<ParsedMeasureNote>> =
+                vec![Vec::new(); voice_order.len()];
             let mut measure_chord: Option<Chord> = None;
-            let mut chord_count: usize = 0;
+            let mut current_pos = 0_u32;
+            let mut last_note_start = 0_u32;
 
             for mel in &mx_measure.content {
                 match mel {
@@ -1028,31 +1215,34 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                     mx::MeasureElement::Harmony(h) => {
                         measure_chord = harmony_to_chord(h);
                     }
+                    mx::MeasureElement::Backup(backup) => {
+                        current_pos = current_pos.saturating_sub(*backup.content.duration.content);
+                    }
+                    mx::MeasureElement::Forward(forward) => {
+                        current_pos = current_pos.saturating_add(*forward.content.duration.content);
+                    }
                     mx::MeasureElement::Note(note) => {
                         if let mx::NoteType::Normal(info) = &note.content.info {
                             let is_chord = info.chord.is_some();
                             let dur_raw = (*info.duration.content).min(u32::from(u16::MAX)) as u16;
-
-                            let voice_str = if is_chord {
-                                chord_count += 1;
-                                format!("__measure{}_chord_{chord_count}", part_measures.len())
+                            let start = if is_chord {
+                                last_note_start
                             } else {
-                                note.content
-                                    .voice
-                                    .as_ref()
-                                    .map(|v| v.content.clone())
-                                    .unwrap_or_else(|| "1".to_string())
+                                current_pos
                             };
 
-                            let voice_idx = if let Some(idx) =
-                                voice_order.iter().position(|v| v == &voice_str)
-                            {
-                                idx
-                            } else {
-                                voice_order.push(voice_str.clone());
-                                voice_data.push(Vec::new());
-                                voice_order.len() - 1
-                            };
+                            let voice_str = note
+                                .content
+                                .voice
+                                .as_ref()
+                                .map(|v| v.content.clone())
+                                .unwrap_or_else(|| "1".to_string());
+
+                            let voice_idx = add_parsed_voice(
+                                &mut voice_order,
+                                &mut parsed_voice_events,
+                                &voice_str,
+                            );
 
                             let engraving = if let Some(type_el) = &note.content.r#type {
                                 let base = type_value_to_duration_class(&type_el.content);
@@ -1075,26 +1265,27 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
                                     let letter = step_to_note_letter(&pitch.content.step.content);
                                     let octave = *pitch.content.octave.content;
                                     let sf = alter_to_sharp_flat(pitch.content.alter.as_ref());
-                                    voice_data[voice_idx].push(NotePlayed {
-                                        note: Note::new(letter, sf, octave),
-                                        engraving,
-                                        duration: dur_raw,
-                                        amplitude: 0.8,
-                                        staff,
-                                        voice: voice_idx,
+                                    parsed_voice_events[voice_idx].push(ParsedMeasureNote {
+                                        start,
+                                        note: NotePlayed {
+                                            note: Note::new(letter, sf, octave),
+                                            engraving,
+                                            duration: dur_raw,
+                                            amplitude: 0.8,
+                                            staff,
+                                            voice: voice_idx,
+                                        },
                                     });
                                 }
                                 mx::AudibleType::Rest(_) => {
-                                    voice_data[voice_idx].push(NotePlayed {
-                                        note: Note::new(NoteLetter::C, None, 0),
-                                        engraving,
-                                        duration: dur_raw,
-                                        amplitude: 0.0,
-                                        staff,
-                                        voice: voice_idx,
-                                    });
+                                    let _ = (engraving, staff);
                                 }
                                 mx::AudibleType::Unpitched(_) => {}
+                            }
+
+                            if !is_chord {
+                                last_note_start = start;
+                                current_pos = current_pos.saturating_add(u32::from(dur_raw));
                             }
                         }
                     }
@@ -1104,7 +1295,7 @@ fn score_to_composition(score: &mx::ScorePartwise) -> Composition {
 
             let mut meas = Measure::new(current_key, current_ts, measure_chord, current_tempo_bpm);
             meas.divisions = current_divs.min(u32::from(u16::MAX)) as u16;
-            meas.notes = voice_data;
+            meas.notes = build_storage_voices_from_parsed(parsed_voice_events, meas.divisions);
             let has_staff2 = meas.notes.iter().flatten().any(|n| n.staff == Some(2));
             if has_staff2 {
                 meas.staves = vec![Staff::Grand];
@@ -1250,6 +1441,95 @@ mod tests {
             .filter(|e| matches!(e, mx::MeasureElement::Backup(_)))
             .count();
         assert_eq!(backup_count, 1);
+    }
+
+    #[test]
+    fn musicxml_round_trip_preserves_same_voice_chords() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="4.0">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Piano</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>12</divisions>
+        <key><fifths>-3</fifths><mode>minor</mode></key>
+        <time><beats>6</beats><beat-type>8</beat-type></time>
+        <staves>2</staves>
+      </attributes>
+      <note>
+        <pitch><step>A</step><alter>-1</alter><octave>4</octave></pitch>
+        <duration>12</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>C</step><octave>5</octave></pitch>
+        <duration>12</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+      <note>
+        <chord/>
+        <pitch><step>G</step><octave>5</octave></pitch>
+        <duration>12</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+        <staff>1</staff>
+      </note>
+    </measure>
+  </part>
+</score-partwise>"#;
+
+        let score = musicxml::read_score_data_partwise(xml.as_bytes().to_vec()).unwrap();
+        let composition = score_to_composition(&score);
+        let round_tripped = composition_to_score(&composition);
+
+        let mx::PartElement::Measure(measure) = &round_tripped.content.part[0].content[0] else {
+            panic!("expected measure");
+        };
+
+        let note_elements: Vec<&mx::Note> = measure
+            .content
+            .iter()
+            .filter_map(|element| match element {
+                mx::MeasureElement::Note(note) => Some(note),
+                _ => None,
+            })
+            .collect();
+        let pitched_note_elements: Vec<&mx::Note> = note_elements
+            .into_iter()
+            .filter(|note| {
+                matches!(
+                    &note.content.info,
+                    mx::NoteType::Normal(info) if matches!(info.audible, mx::AudibleType::Pitch(_))
+                )
+            })
+            .collect();
+        assert_eq!(pitched_note_elements.len(), 3);
+
+        let chord_flags: Vec<bool> = pitched_note_elements
+            .iter()
+            .map(|note| match &note.content.info {
+                mx::NoteType::Normal(info) => info.chord.is_some(),
+                _ => false,
+            })
+            .collect();
+        assert_eq!(chord_flags, vec![false, true, true]);
+
+        let backup_count = measure
+            .content
+            .iter()
+            .filter(|element| matches!(element, mx::MeasureElement::Backup(_)))
+            .count();
+        assert_eq!(backup_count, 0);
     }
 
     #[test]

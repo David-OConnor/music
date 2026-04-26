@@ -17,7 +17,9 @@ fn composition_list(comps: &[Composition], ui: &mut Ui) {
 
         ui.horizontal(|ui| {
             if ui.button("Play").clicked() {
-                comp.play();
+                if comp.play().is_err() {
+                    eprintln!("Problem playing music")
+                };
             }
 
             if ui.button("Save MusicXML").clicked() {
