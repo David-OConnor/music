@@ -58,9 +58,9 @@ impl RhythmPattern {
         }
     }
 
-    /// todo: A/R
-    /// todo: Make bass guitar or piano LH too?
-    pub fn make_midi_drums(&self, path: &Path) -> io::Result<()> {
-        Ok(())
-    }
+    // /// todo: A/R
+    // /// todo: Make bass guitar or piano LH too?
+    // pub fn make_midi_drums(&self, path: &Path) -> io::Result<()> {
+    //     Ok(())
+    // }
 }

@@ -1,5 +1,6 @@
 //! Generation of music, perhaps based on NNs. (Burn?)
 
+use std::io;
 use egui::Key;
 use musicxml::elements::Chord;
 
@@ -19,7 +20,7 @@ pub struct CompositionGuide {
     /// By measure.
     pub chords: Vec<Chord>,
     /// By measure. Must match chord len.
-    pub rhythm_pattern: RhythmPattern,
+    pub rhythm_pattern: Vec<RhythmPattern>,
     // todo: A/R. Not implemented yet.
     pub comps: Vec<CompositionComponent>,
 }
@@ -29,10 +30,14 @@ impl CompositionGuide {
     /// - Drums: Plays the most common drum hits, following all rhythm hits, prioritrizing primary,
     /// then secondary, then tertiary. Might use kick, snare, ride, toms as primaries, and accent
     /// with crash etc.
-    /// - Piano: Plays simple chord structures, roughly following the primary rhythm beats
-    /// - Bass guitar: plays arbitrary notes from the chords, following the primary and seconary
-    /// rhythm beats
-    pub fn make_comp(&self) -> Composition {
-        todo!()
+    /// - Piano: Plays the input chord structures exactly, roughly following the primary rhythm beats. This
+    /// could also be used for guitar.
+    /// - Bass guitar: plays arbitrary notes from the chords, following the primary and secondary
+    /// rhythm beats. Perhaps a mix of eigth and sixteenth notes as a baseline, but see the time signature.
+    pub fn make_comp(&self) -> io::Result<Composition> {
+        if self.chords.len() != self.rhythm_pattern.len() {
+            return Err(io::Error::other("Error generating composition: Chords and rythm pattern\
+            must be the same length."))
+        }
     }
 }
