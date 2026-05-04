@@ -370,7 +370,7 @@ pub fn prog_1564(key: Key) -> Vec<Chord> {
     )
 }
 
-pub fn prog_pachabel(key: Key) -> Vec<Chord> {
+pub fn pachelbel(key: Key) -> Vec<Chord> {
     use ChordDegree::*;
     create_prog(
         key,
@@ -380,6 +380,9 @@ pub fn prog_pachabel(key: Key) -> Vec<Chord> {
             (VI, Inversion::Root),
             (III, Inversion::Root),
             (IV, Inversion::Root),
+            (III, Inversion::Root),
+            (IV, Inversion::Root),
+            (V, Inversion::Root),
         ],
     )
 }

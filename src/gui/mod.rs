@@ -66,14 +66,15 @@ const EXTENDED_INVERSIONS: [(Inversion, &str); 4] = [
     (Inversion::Third, "3rd"),
 ];
 
-fn composition_list(comps: &[Composition], ui: &mut Ui) {
+fn composition_list(comps: &[Composition], ui: &mut Ui) -> bool {
+    let mut load_clicked = false;
     for comp in comps {
         let title_sanitized_for_gui = comp.to_string().replace("♭", "b");
         ui.label(title_sanitized_for_gui);
 
         ui.horizontal(|ui| {
             if ui.button("Load").clicked() {
-                // todo: File dialog using
+                load_clicked = true;
             }
 
             if ui.button("Play").clicked() {
@@ -135,6 +136,7 @@ fn composition_list(comps: &[Composition], ui: &mut Ui) {
         ui.separator();
         ui.add_space(ROW_SPACING);
     }
+    load_clicked
 }
 
 /// Interface to generate chord progressions
@@ -192,11 +194,7 @@ fn chord_prog_maker(state: &mut State, ui: &mut Ui) {
             normalize_key_choice(&mut state.ui.prog_editor.key);
             if state.ui.prog_editor.key != old_key {
                 let new_key = state.ui.prog_editor.key;
-                sync_diatonic_quality_for_key_change(
-                    &mut state.ui.prog_editor.chord_to_add,
-                    old_key,
-                    new_key,
-                );
+                sync_add_chord_quality(&mut state.ui.prog_editor.chord_to_add, new_key);
                 for chord_ui in &mut state.ui.prog_editor.chords {
                     sync_diatonic_quality_for_key_change(chord_ui, old_key, new_key);
                 }
@@ -213,6 +211,7 @@ fn chord_prog_maker(state: &mut State, ui: &mut Ui) {
                     ui,
                     state.ui.prog_editor.key,
                     &mut state.ui.prog_editor.chord_to_add,
+                    true,
                 );
             });
             ui.monospace(
@@ -262,7 +261,7 @@ fn chord_prog_maker(state: &mut State, ui: &mut Ui) {
 
                         ui.label((idx + 1).to_string());
                         ui.push_id(idx, |ui| {
-                            draw_chord_editor_controls(ui, key, chord_ui);
+                            draw_chord_editor_controls(ui, key, chord_ui, false);
                         });
                         ui.monospace(chord_ui.to_chord(key).to_string());
                         if ui.small_button("X").clicked() {
@@ -315,10 +314,9 @@ fn normalize_key_choice(key: &mut Key) {
         return;
     }
 
-    if supported
-        .iter()
-        .any(|&(base_note, sharp_flat)| base_note == key.base_note && sharp_flat == SharpFlat::Natural)
-    {
+    if supported.iter().any(|&(base_note, sharp_flat)| {
+        base_note == key.base_note && sharp_flat == SharpFlat::Natural
+    }) {
         key.sharp_flat = SharpFlat::Natural;
         return;
     }
@@ -391,7 +389,17 @@ fn sync_diatonic_quality_for_key_change(
     normalize_editor_chord(chord_ui);
 }
 
-fn draw_chord_editor_controls(ui: &mut Ui, key: Key, chord_ui: &mut ProgEditorChordUi) {
+fn sync_add_chord_quality(chord_ui: &mut ProgEditorChordUi, key: Key) {
+    chord_ui.quality = key.diatonic_quality(chord_ui.degree);
+    normalize_editor_chord(chord_ui);
+}
+
+fn draw_chord_editor_controls(
+    ui: &mut Ui,
+    key: Key,
+    chord_ui: &mut ProgEditorChordUi,
+    auto_sync_quality_for_degree: bool,
+) {
     let prev_degree = chord_ui.degree;
     let prev_quality = chord_ui.quality;
     let prev_extension = chord_ui.extension;
@@ -408,12 +416,15 @@ fn draw_chord_editor_controls(ui: &mut Ui, key: Key, chord_ui: &mut ProgEditorCh
             }
         });
 
-    if chord_ui.degree != prev_degree
-        && chord_ui.extension.is_none()
-        && chord_ui.alterations.is_empty()
-        && prev_quality == key.diatonic_quality(prev_degree)
-    {
-        chord_ui.quality = key.diatonic_quality(chord_ui.degree);
+    if chord_ui.degree != prev_degree {
+        if auto_sync_quality_for_degree {
+            sync_add_chord_quality(chord_ui, key);
+        } else if chord_ui.extension.is_none()
+            && chord_ui.alterations.is_empty()
+            && prev_quality == key.diatonic_quality(prev_degree)
+        {
+            chord_ui.quality = key.diatonic_quality(chord_ui.degree);
+        }
     }
 
     ComboBox::from_id_salt("quality")
@@ -463,7 +474,26 @@ fn draw_chord_editor_controls(ui: &mut Ui, key: Key, chord_ui: &mut ProgEditorCh
 }
 
 pub fn draw(state: &mut State, ui: &mut Ui) {
-    // ctx.options_mut(|o| o.theme_preference = ThemePreference::Dark);
+    state.ui.file_dialog.update(ui.ctx());
+
+    if let Some(path) = state.ui.file_dialog.take_picked() {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        match ext.as_str() {
+            "mid" | "midi" => match Composition::load_midi(&path) {
+                Ok(comp) => state.compositions.push(comp),
+                Err(e) => eprintln!("Error loading MIDI: {e}"),
+            },
+            "mxl" | "musicxml" => match Composition::load_musicxml(&path) {
+                Ok(comp) => state.compositions.push(comp),
+                Err(e) => eprintln!("Error loading MusicXML: {e}"),
+            },
+            _ => eprintln!("Unsupported file format: .{ext}"),
+        }
+    }
 
     CentralPanel::default().show_inside(ui, |ui| {
         ui.heading("Music");
@@ -472,7 +502,9 @@ pub fn draw(state: &mut State, ui: &mut Ui) {
 
         ui.label("Compositions");
 
-        composition_list(&state.compositions, ui);
+        if composition_list(&state.compositions, ui) {
+            state.ui.file_dialog.pick_file();
+        }
 
         ui.add_space(ROW_SPACING);
 

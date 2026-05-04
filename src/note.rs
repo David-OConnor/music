@@ -193,7 +193,7 @@ impl NoteLetter {
 #[derive(Clone, Debug)]
 pub struct Note {
     pub letter: NoteLetter,
-    /// If none, rever to the key.
+    /// If none, revert to the key.
     pub sharp_flat: Option<SharpFlat>,
     // todo: Should we break this down again, with a variant which has no octave?
     pub octave: u8,

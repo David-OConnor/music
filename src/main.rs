@@ -2,6 +2,7 @@ use std::path::Path;
 
 use chord::{Chord, ChordQuality, ChordQuality::*};
 use egui::Ui;
+use egui_file_dialog::FileDialog;
 use key_scale::{Key, MajorMinor, SharpFlat};
 
 use crate::{
@@ -30,10 +31,13 @@ mod midi;
 mod music_xml;
 mod note;
 mod overtones;
+mod percussion;
 mod player;
+mod rhythm;
 
 pub struct StateUi {
     pub prog_editor: ProgEditorUi,
+    pub file_dialog: FileDialog,
 }
 
 #[derive(Clone, PartialEq)]
@@ -117,6 +121,7 @@ impl Default for StateUi {
     fn default() -> Self {
         Self {
             prog_editor: ProgEditorUi::default(),
+            file_dialog: FileDialog::new(),
         }
     }
 }
