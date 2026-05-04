@@ -11,53 +11,100 @@ use crate::{
 /// Ordered by MIDI Note Number (35 to 81).
 #[derive(Clone, Copy, PartialEq)]
 pub enum PercussionHit {
-    AcousticBassDrum, // 35
-    Kick,             // 36 (GM: Bass Drum 1)
-    SideStick,        // 37
-    Snare,            // 38 (GM: Acoustic Snare)
-    HandClap,         // 39
-    SnareRoll,        // 40 (GM: Electric Snare - used as Roll placeholder)
-    Tom5,             // 41 (GM: Low Floor Tom)
-    HighhatClosed,    // 42 (GM: Closed Hi-Hat)
-    Tom4,             // 43 (GM: High Floor Tom)
-    PedalHiHat,       // 44
-    Tom3,             // 45 (GM: Low Tom)
-    HighhatOpen,      // 46 (GM: Open Hi-Hat)
-    Tom2,             // 47 (GM: Low-Mid Tom)
-    Tom1,             // 48 (GM: Hi-Mid Tom)
-    Crash0,           // 49 (GM: Crash Cymbal 1)
-    Tom0,             // 50 (GM: High Tom)
-    Ride0,            // 51 (GM: Ride Cymbal 1)
-    Gong,             // 52 (GM: Chinese Cymbal - used as Gong placeholder)
-    RideBell,         // 53
-    Tamborine,        // 54
-    SplashCymbal,     // 55
-    Cowbell,          // 56
-    Crash1,           // 57 (GM: Crash Cymbal 2)
-    Vibraslap,        // 58
-    Ride1,            // 59 (GM: Ride Cymbal 2)
-    HiBongo,          // 60
-    LowBongo,         // 61
-    MuteHiConga,      // 62
-    OpenHiConga,      // 63
-    LowConga,         // 64
-    HighTimbale,      // 65
-    LowTimbale,       // 66
-    HighAgogo,        // 67
-    LowAgogo,         // 68
-    Cabasa,           // 69
-    Maracas,          // 70
-    ShortWhistle,     // 71
-    LongWhistle,      // 72
-    ShortGuiro,       // 73
-    LongGuiro,        // 74
-    Claves,           // 75
-    HiWoodBlock,      // 76
-    LowWoodBlock,     // 77
-    MuteCuica,        // 78
-    OpenCuica,        // 79
-    MuteTriangle,     // 80
-    OpenTriangle,     // 81
+    /// 35
+    AcousticBassDrum,
+    /// 36 (GM: Bass Drum 1)
+    Kick,
+    /// 37
+    SideStick,
+    /// 38 (GM: Acoustic Snare)
+    Snare,
+    /// 39
+    HandClap,
+    /// 40 (GM: Electric Snare - used as Roll placeholder)
+    SnareRoll,
+    /// 41 (GM: Low Floor Tom)
+    Tom5,
+    /// 42 (GM: Closed Hi-Hat)
+    HighhatClosed,
+    /// 43 (GM: High Floor Tom)
+    Tom4,
+    /// 44
+    PedalHiHat,
+    /// 45 (GM: Low Tom)
+    Tom3,
+    /// 46 (GM: Open Hi-Hat)
+    HighhatOpen,
+    /// 47 (GM: Low-Mid Tom)
+    Tom2,
+    /// 48 (GM: Hi-Mid Tom)
+    Tom1,
+    /// 49 (GM: Crash Cymbal 1)
+    Crash0,
+    /// 50 (GM: High Tom)
+    Tom0,
+    /// 51 (GM: Ride Cymbal 1)
+    Ride0,
+    /// 52 (GM: Chinese Cymbal - used as Gong placeholder)
+    Gong,
+    /// 53
+    RideBell,
+    /// 54
+    Tamborine,
+    /// 55
+    SplashCymbal,
+    /// 56
+    Cowbell,
+    /// 57 (GM: Crash Cymbal 2)
+    Crash1,
+    /// 58
+    Vibraslap,
+    /// 59 (GM: Ride Cymbal 2)
+    Ride1,
+    /// 60
+    HiBongo,
+    /// 61
+    LowBongo,
+    /// 62
+    MuteHiConga,
+    /// 63
+    OpenHiConga,
+    /// 64
+    LowConga,
+    /// 65
+    HighTimbale,
+    /// 66
+    LowTimbale,
+    /// 67
+    HighAgogo,
+    /// 68
+    LowAgogo,
+    /// 69
+    Cabasa,
+    /// 70
+    Maracas,
+    /// 71
+    ShortWhistle,
+    /// 72
+    LongWhistle,
+    /// 73
+    ShortGuiro,
+    /// 74
+    LongGuiro,
+    /// 75
+    Claves,
+    /// 76
+    HiWoodBlock,
+    /// 77
+    LowWoodBlock,
+    /// 78
+    MuteCuica,
+    /// 79
+    OpenCuica,
+    /// 80
+    MuteTriangle,
+    /// 81
+    OpenTriangle,
 }
 
 impl PercussionHit {

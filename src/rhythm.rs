@@ -7,7 +7,8 @@ use std::{io, path::Path};
 
 use crate::measure::TimeSignature;
 
-/// For now, this is for a given measure.
+/// For now, this is for a given measure. Primary hits are the most rhythmically pronounced. Perhaps,
+/// a bass drum and bass guitar. Secondary hits are perhaps less proncounced, and so on.
 #[derive(Clone, Default)]
 pub struct RhythmPattern {
     /// todo: Duration ticks on a relative scale? In a given measure?
