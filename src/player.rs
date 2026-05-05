@@ -1,15 +1,33 @@
 //! For playing music.
 
-use std::{f32::consts::PI, io, num::NonZero};
+use std::{f32::consts::PI, io, num::NonZero, sync::Arc, thread};
 
 use rodio::{DeviceSinkBuilder, Player, buffer::SamplesBuffer, nz};
 
 use crate::composition::Composition;
 
+/// Handle to in-progress playback. Drop it (or call `stop_playing`) to halt
+/// audio early; otherwise the spawned thread exits naturally when the buffer
+/// finishes.
+pub struct Playback {
+    player: Arc<Player>,
+}
+
+impl Playback {
+    /// True once the queued audio has finished (or playback was stopped).
+    pub fn is_finished(&self) -> bool {
+        self.player.empty()
+    }
+
+    pub fn stop(&self) {
+        self.player.stop();
+    }
+}
+
 const SAMPLE_RATE: u32 = 44_100;
 const FADE_FRACTION: f32 = 0.08;
 
-pub fn play(composition: &Composition) -> io::Result<()> {
+pub fn play(composition: &Composition) -> io::Result<Option<Playback>> {
     // First pass: compute total buffer size
     let mut total_samples = 0usize;
     for (_, measures) in &composition.measures_by_part {
@@ -43,7 +61,7 @@ pub fn play(composition: &Composition) -> io::Result<()> {
     }
 
     if total_samples == 0 {
-        return Ok(());
+        return Ok(None);
     }
 
     let mut buf = vec![0f32; total_samples];
@@ -113,13 +131,22 @@ pub fn play(composition: &Composition) -> io::Result<()> {
         DeviceSinkBuilder::open_default_sink().map_err(|e| io::Error::other(e.to_string()))?;
     device_sink.log_on_drop(false);
 
-    let player = Player::connect_new(device_sink.mixer());
+    let player = Arc::new(Player::connect_new(device_sink.mixer()));
 
     let sample_rate = NonZero::new(SAMPLE_RATE).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "sample rate must be non-zero")
     })?;
     player.append(SamplesBuffer::new(nz!(1), sample_rate, buf));
-    player.sleep_until_end();
 
-    Ok(())
+    let player_thread = Arc::clone(&player);
+    thread::spawn(move || {
+        player_thread.sleep_until_end();
+        drop(device_sink);
+    });
+
+    Ok(Some(Playback { player }))
+}
+
+pub fn stop_playing(playback: &Playback) {
+    playback.stop();
 }

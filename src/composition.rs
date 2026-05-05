@@ -6,7 +6,7 @@ use std::{fmt, fmt::Display, io, path::Path};
 
 use crate::{
     instrument::Instrument, measure::Measure, midi, music_xml, music_xml::MusicXmlFormat,
-    overtones::Temperament, player,
+    overtones::Temperament, player, player::Playback,
 };
 
 #[derive(Default)]
@@ -99,7 +99,7 @@ impl Composition {
         }
     }
 
-    pub fn play(&self) -> io::Result<()> {
+    pub fn play(&self) -> io::Result<Option<Playback>> {
         player::play(self)
     }
 

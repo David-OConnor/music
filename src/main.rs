@@ -16,6 +16,7 @@ use crate::{
     music_xml::MusicXmlFormat,
     note::{Note, NoteLetter},
     overtones::Temperament,
+    player::Playback,
     rhythm::RhythmPattern,
 };
 
@@ -212,6 +213,8 @@ impl Default for StateUi {
 pub struct State {
     pub compositions: Vec<Composition>,
     pub ui: StateUi,
+    /// Active playback handle and the index of the composition it belongs to.
+    pub current_playback: Option<(usize, Playback)>,
 }
 
 fn hits_to_string(hits: &[u8]) -> String {

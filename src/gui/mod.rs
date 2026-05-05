@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use egui::{Button, CentralPanel, Color32, ComboBox, DragValue, TextEdit, Ui};
+use egui::{
+    Align, Button, CentralPanel, Color32, ComboBox, DragValue, Layout, ScrollArea, TextEdit, Ui,
+    vec2,
+};
 
 use crate::{
     CompositionGuideMeasureUi, GuideEditorFeedback, ProgEditorChordUi, RhythmPatternUi, State,
@@ -10,6 +13,7 @@ use crate::{
     measure::TimeSignature,
     music_xml::MusicXmlFormat,
     note::NoteLetter,
+    player,
     rhythm::RhythmPattern,
 };
 
@@ -18,6 +22,10 @@ pub const WINDOW_HEIGHT: f32 = 1000.;
 
 pub(in crate::gui) const ROW_SPACING: f32 = 12.;
 pub(in crate::gui) const COL_SPACING: f32 = 12.;
+
+/// Fixed width for each measure card in the guide editor's wrapping row.
+/// Bounding the width is what lets `horizontal_wrapped` actually wrap the cards.
+const MEASURE_CARD_WIDTH: f32 = 380.;
 
 const MAJOR_KEY_TONICS: [(NoteLetter, SharpFlat); 15] = [
     (NoteLetter::C, SharpFlat::Natural),
@@ -68,9 +76,15 @@ const EXTENDED_INVERSIONS: [(Inversion, &str); 4] = [
     (Inversion::Third, "3rd"),
 ];
 
-fn composition_list(comps: &[Composition], ui: &mut Ui) -> bool {
+fn composition_list(state: &mut State, ui: &mut Ui) -> bool {
+    if let Some((_, playback)) = &state.current_playback {
+        if playback.is_finished() {
+            state.current_playback = None;
+        }
+    }
+
     let mut load_clicked = false;
-    for comp in comps {
+    for (idx, comp) in state.compositions.iter().enumerate() {
         let title_sanitized_for_gui = comp.to_string().replace("♭", "b");
         ui.label(title_sanitized_for_gui);
 
@@ -80,9 +94,29 @@ fn composition_list(comps: &[Composition], ui: &mut Ui) -> bool {
             }
 
             if ui.button("Play").clicked() {
-                if comp.play().is_err() {
-                    eprintln!("Problem playing music")
-                };
+                if let Some((_, prev)) = &state.current_playback {
+                    player::stop_playing(prev);
+                }
+                state.current_playback = None;
+
+                match comp.play() {
+                    Ok(Some(playback)) => {
+                        state.current_playback = Some((idx, playback));
+                    }
+                    Ok(None) => {}
+                    Err(_) => eprintln!("Problem playing music"),
+                }
+            }
+
+            let is_playing = matches!(
+                &state.current_playback,
+                Some((playing_idx, _)) if *playing_idx == idx,
+            );
+            if is_playing && ui.button("Stop").clicked() {
+                if let Some((_, playback)) = &state.current_playback {
+                    player::stop_playing(playback);
+                }
+                state.current_playback = None;
             }
 
             if ui.button("Save MusicXML").clicked() {
@@ -151,13 +185,14 @@ fn composition_guide_editor(state: &mut State, ui: &mut Ui) {
         ui.heading("Composition Guide");
 
         ui.horizontal_wrapped(|ui| {
-            ui.label("Key");
+            ui.label("Key:");
             let mut tonic = (
                 state.ui.guide_editor.key.base_note,
                 state.ui.guide_editor.key.sharp_flat,
             );
 
             ComboBox::from_id_salt("guide_editor_key_tonic")
+                .width(60.)
                 .selected_text(tonic_label(tonic.0, tonic.1))
                 .show_ui(ui, |ui| {
                     for &(base_note, sharp_flat) in
@@ -189,10 +224,11 @@ fn composition_guide_editor(state: &mut State, ui: &mut Ui) {
                 });
 
             ui.add_space(COL_SPACING);
-            ui.label("Time signature");
+            ui.label("Time signature:");
             ui.add(DragValue::new(&mut state.ui.guide_editor.time_sig_numerator).range(1..=32));
             ui.label("/");
             ComboBox::from_id_salt("guide_editor_time_sig_denominator")
+                .width(48.)
                 .selected_text(state.ui.guide_editor.time_sig_denominator.to_string())
                 .show_ui(ui, |ui| {
                     for denominator in [1_u8, 2, 4, 8, 16, 32] {
@@ -258,29 +294,49 @@ fn composition_guide_editor(state: &mut State, ui: &mut Ui) {
             let sig = state.ui.guide_editor.time_signature();
             let mut remove_idx = None;
 
-            for (idx, measure_ui) in state.ui.guide_editor.measures.iter_mut().enumerate() {
-                let before = measure_ui.clone();
+            let cards_per_row =
+                ((ui.available_width() / (MEASURE_CARD_WIDTH + COL_SPACING)).floor() as usize)
+                    .max(1);
 
-                ui.group(|ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.strong(format!("Measure {}", idx + 1));
-                        ui.add_space(COL_SPACING);
-                        ui.monospace(measure_preview(key, measure_ui));
-                        if ui.small_button("Remove").clicked() {
-                            remove_idx = Some(idx);
+            let measures = &mut state.ui.guide_editor.measures;
+            let total = measures.len();
+            let mut row_start = 0;
+            while row_start < total {
+                let row_end = (row_start + cards_per_row).min(total);
+                ui.horizontal_top(|ui| {
+                    for idx in row_start..row_end {
+                        let measure_ui = &mut measures[idx];
+                        let before = measure_ui.clone();
+
+                        ui.allocate_ui_with_layout(
+                            vec2(MEASURE_CARD_WIDTH, 0.0),
+                            Layout::top_down(Align::Min),
+                            |ui| {
+                                ui.set_max_width(MEASURE_CARD_WIDTH);
+                                ui.group(|ui| {
+                                    ui.set_max_width(MEASURE_CARD_WIDTH);
+                                    ui.horizontal(|ui| {
+                                        ui.strong(format!("Measure {}", idx + 1));
+                                        if ui.small_button("Remove").clicked() {
+                                            remove_idx = Some(idx);
+                                        }
+                                    });
+                                    ui.monospace(measure_preview(key, measure_ui));
+                                    ui.add_space(ROW_SPACING / 3.0);
+                                    ui.push_id(idx, |ui| {
+                                        draw_measure_editor(ui, sig, key, measure_ui, false);
+                                    });
+                                });
+                            },
+                        );
+
+                        if *measure_ui != before {
+                            dirty = true;
                         }
-                    });
-                    ui.add_space(ROW_SPACING / 3.0);
-                    ui.push_id(idx, |ui| {
-                        draw_measure_editor(ui, sig, key, measure_ui, false);
-                    });
+                    }
                 });
-
                 ui.add_space(ROW_SPACING / 2.0);
-
-                if *measure_ui != before {
-                    dirty = true;
-                }
+                row_start = row_end;
             }
 
             if let Some(remove_idx) = remove_idx {
@@ -351,10 +407,11 @@ fn draw_measure_editor(
     auto_sync_quality_for_degree: bool,
 ) {
     ui.horizontal_wrapped(|ui| {
-        ui.label("Chord");
+        ui.label("Chord:");
         draw_chord_editor_controls(ui, key, &mut measure_ui.chord, auto_sync_quality_for_degree);
     });
     ui.add_space(ROW_SPACING / 3.0);
+
     draw_rhythm_pattern_controls(ui, time_sig, &mut measure_ui.rhythm);
 }
 
@@ -566,6 +623,7 @@ fn draw_chord_editor_controls(
     let prev_extension = chord_ui.extension;
 
     ComboBox::from_id_salt("degree")
+        .width(48.)
         .selected_text(chord_ui.degree.to_string(key, Inversion::Root))
         .show_ui(ui, |ui| {
             for degree in ChordDegree::all() {
@@ -603,6 +661,7 @@ fn draw_chord_editor_controls(
         });
 
     ComboBox::from_id_salt("extension")
+        .width(48.)
         .selected_text(extension_label(chord_ui.extension))
         .show_ui(ui, |ui| {
             for extension in [None, Some(7), Some(9), Some(11), Some(13)] {
@@ -624,6 +683,7 @@ fn draw_chord_editor_controls(
     normalize_editor_chord(chord_ui);
 
     ComboBox::from_id_salt("inversion")
+        .width(48.)
         .selected_text(inversion_label(chord_ui.inversion))
         .show_ui(ui, |ui| {
             for &(inversion, label) in supported_inversions(chord_ui.extension) {
@@ -657,18 +717,18 @@ pub fn draw(state: &mut State, ui: &mut Ui) {
     }
 
     CentralPanel::default().show_inside(ui, |ui| {
-        ui.heading("Music");
+        ScrollArea::vertical()
+            // .min_scrolled_height(400.0)
+            .show(ui, |ui| {
+                ui.label("Compositions");
 
-        ui.add_space(ROW_SPACING);
+                if composition_list(state, ui) {
+                    state.ui.file_dialog.pick_file();
+                }
 
-        ui.label("Compositions");
+                ui.add_space(ROW_SPACING);
 
-        if composition_list(&state.compositions, ui) {
-            state.ui.file_dialog.pick_file();
-        }
-
-        ui.add_space(ROW_SPACING);
-
-        composition_guide_editor(state, ui);
+                composition_guide_editor(state, ui);
+            });
     });
 }
