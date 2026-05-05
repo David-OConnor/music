@@ -8,13 +8,15 @@ use key_scale::{Key, MajorMinor, SharpFlat};
 use crate::{
     chord::{ChordDegree, Inversion, prog_1645},
     composition::Composition,
+    generation::CompositionGuide,
     gui::{WINDOW_HEIGHT, WINDOW_WIDTH},
     instrument::Instrument,
     make_bass_music::make_bassline_random,
     measure::{Measure, TimeSignature},
     music_xml::MusicXmlFormat,
-    note::{Note, NoteEngraving, NoteLetter},
+    note::{Note, NoteLetter},
     overtones::Temperament,
+    rhythm::RhythmPattern,
 };
 
 mod chord;
@@ -36,7 +38,7 @@ mod player;
 mod rhythm;
 
 pub struct StateUi {
-    pub prog_editor: ProgEditorUi,
+    pub guide_editor: CompositionGuideEditorUi,
     pub file_dialog: FileDialog,
 }
 
@@ -81,38 +83,118 @@ impl Default for ProgEditorChordUi {
     }
 }
 
-pub struct ProgEditorUi {
-    pub key: Key,
-    pub chord_to_add: ProgEditorChordUi,
-    pub chords: Vec<ProgEditorChordUi>,
+#[derive(Clone, PartialEq)]
+pub struct RhythmPatternUi {
+    pub primary_division: u8,
+    pub primary_hits: String,
+    pub secondary_division: u8,
+    pub secondary_hits: String,
+    pub tertiary_division: u8,
+    pub tertiary_hits: String,
 }
 
-impl ProgEditorUi {
-    pub fn rebuild_progression(&self) -> Vec<Chord> {
-        self.chords
-            .iter()
-            .map(|chord_ui| chord_ui.to_chord(self.key))
-            .collect()
+impl RhythmPatternUi {
+    pub fn from_pattern(pattern: &RhythmPattern) -> Self {
+        Self {
+            primary_division: pattern.hits_primary.0,
+            primary_hits: hits_to_string(&pattern.hits_primary.1),
+            secondary_division: pattern.hits_secondary.0,
+            secondary_hits: hits_to_string(&pattern.hits_secondary.1),
+            tertiary_division: pattern.hits_tertiary.0,
+            tertiary_hits: hits_to_string(&pattern.hits_tertiary.1),
+        }
     }
 
-    pub fn sync_from_progression(&mut self, chords: &[Chord]) {
-        if self.chords.len() == chords.len() {
-            return;
+    pub fn to_pattern(&self) -> Result<RhythmPattern, String> {
+        Ok(RhythmPattern {
+            hits_primary: build_hit_spec("Primary", self.primary_division, &self.primary_hits)?,
+            hits_secondary: build_hit_spec(
+                "Secondary",
+                self.secondary_division,
+                &self.secondary_hits,
+            )?,
+            hits_tertiary: build_hit_spec("Tertiary", self.tertiary_division, &self.tertiary_hits)?,
+        })
+    }
+}
+
+impl Default for RhythmPatternUi {
+    fn default() -> Self {
+        Self::from_pattern(&RhythmPattern::measure_downbeats(TimeSignature::new(4, 4)))
+    }
+}
+
+#[derive(Clone, PartialEq, Default)]
+pub struct CompositionGuideMeasureUi {
+    pub chord: ProgEditorChordUi,
+    pub rhythm: RhythmPatternUi,
+}
+
+pub struct GuideEditorFeedback {
+    pub text: String,
+    pub is_error: bool,
+}
+
+pub struct CompositionGuideEditorUi {
+    pub key: Key,
+    pub time_sig_numerator: u8,
+    pub time_sig_denominator: u8,
+    pub tempo: u16,
+    pub measure_to_add: CompositionGuideMeasureUi,
+    pub measures: Vec<CompositionGuideMeasureUi>,
+    pub feedback: Option<GuideEditorFeedback>,
+}
+
+impl CompositionGuideEditorUi {
+    pub fn time_signature(&self) -> TimeSignature {
+        TimeSignature::new(self.time_sig_numerator, self.time_sig_denominator)
+    }
+
+    pub fn build_guide(&self) -> Result<CompositionGuide, String> {
+        if self.time_sig_numerator == 0 {
+            return Err("Time signature numerator must be at least 1.".to_string());
+        }
+        if self.time_sig_denominator == 0 {
+            return Err("Time signature denominator must be at least 1.".to_string());
+        }
+        if self.measures.is_empty() {
+            return Err("Add at least one measure before making a composition.".to_string());
         }
 
-        self.chords = chords
-            .iter()
-            .map(|chord| ProgEditorChordUi::from_chord(chord, self.key))
-            .collect();
+        let mut chords = Vec::with_capacity(self.measures.len());
+        let mut rhythm_pattern = Vec::with_capacity(self.measures.len());
+
+        for (idx, measure_ui) in self.measures.iter().enumerate() {
+            chords.push(measure_ui.chord.to_chord(self.key));
+            rhythm_pattern.push(
+                measure_ui
+                    .rhythm
+                    .to_pattern()
+                    .map_err(|err| format!("Measure {}: {err}", idx + 1))?,
+            );
+        }
+
+        Ok(CompositionGuide {
+            key: self.key,
+            time_sig: self.time_signature(),
+            tempo: self.tempo,
+            chords,
+            rhythm_pattern,
+            comps: vec![],
+        })
     }
 }
 
-impl Default for ProgEditorUi {
+impl Default for CompositionGuideEditorUi {
     fn default() -> Self {
         Self {
             key: Key::default(),
-            chord_to_add: ProgEditorChordUi::default(),
-            chords: vec![],
+            time_sig_numerator: 4,
+            time_sig_denominator: 4,
+            tempo: 100,
+            measure_to_add: CompositionGuideMeasureUi::default(),
+            measures: vec![],
+            feedback: None,
         }
     }
 }
@@ -120,7 +202,7 @@ impl Default for ProgEditorUi {
 impl Default for StateUi {
     fn default() -> Self {
         Self {
-            prog_editor: ProgEditorUi::default(),
+            guide_editor: CompositionGuideEditorUi::default(),
             file_dialog: FileDialog::new(),
         }
     }
@@ -129,10 +211,56 @@ impl Default for StateUi {
 #[derive(Default)]
 pub struct State {
     pub compositions: Vec<Composition>,
-    /// For creating compositions based on chord progressions, creating compositions on their own,
-    /// etc.
-    pub chord_prog_active: Vec<Chord>,
     pub ui: StateUi,
+}
+
+fn hits_to_string(hits: &[u8]) -> String {
+    hits.iter()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn parse_hits(raw: &str) -> Result<Vec<u8>, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(vec![]);
+    }
+
+    trimmed
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            part.parse::<u8>()
+                .map_err(|_| format!("Could not parse rhythm hit `{part}` as a number."))
+        })
+        .collect()
+}
+
+fn build_hit_spec(label: &str, division: u8, hits_raw: &str) -> Result<(u8, Vec<u8>), String> {
+    let mut hits = parse_hits(hits_raw)?;
+
+    if division == 0 {
+        if hits.is_empty() {
+            return Ok((0, vec![]));
+        }
+
+        return Err(format!(
+            "{label} hits need a non-zero division when indices are provided."
+        ));
+    }
+
+    if let Some(hit) = hits.iter().find(|&&hit| hit >= division) {
+        return Err(format!(
+            "{label} hit `{hit}` must be less than the division count `{division}`."
+        ));
+    }
+
+    hits.sort_unstable();
+    hits.dedup();
+
+    Ok((division, hits))
 }
 
 impl eframe::App for State {
@@ -344,13 +472,13 @@ fn main() {
     for chord in &prog {
         println!("- {chord}")
     }
-    let comp = make_comp_from_prog(key, &prog);
+    let _comp = make_comp_from_prog(key, &prog);
 
     // let comp = make_test_composition();
     // let comp = make_test_bassline();
 
-    let xml_path = Path::new("./demo.musicxml");
-    let midi_path = Path::new("./demo.mid");
+    let _xml_path = Path::new("./demo.musicxml");
+    let _midi_path = Path::new("./demo.mid");
 
     let comp_loaded = Composition::load_musicxml(Path::new(
         "C:/Users/the_a/compositions/training_etc/alicia-clair-obscur-expedition-33-main-theme-piano-solo.mxl",

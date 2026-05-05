@@ -1,14 +1,16 @@
 use std::path::Path;
 
-use egui::{CentralPanel, ComboBox, Grid, Ui};
+use egui::{Button, CentralPanel, Color32, ComboBox, DragValue, TextEdit, Ui};
 
 use crate::{
-    ProgEditorChordUi, State,
+    CompositionGuideMeasureUi, GuideEditorFeedback, ProgEditorChordUi, RhythmPatternUi, State,
     chord::{ChordDegree, ChordQuality, Inversion},
     composition::Composition,
     key_scale::{Key, MajorMinor, SharpFlat},
+    measure::TimeSignature,
     music_xml::MusicXmlFormat,
     note::NoteLetter,
+    rhythm::RhythmPattern,
 };
 
 pub const WINDOW_WIDTH: f32 = 1200.;
@@ -139,32 +141,27 @@ fn composition_list(comps: &[Composition], ui: &mut Ui) -> bool {
     load_clicked
 }
 
-/// Interface to generate chord progressions
-fn chord_prog_maker(state: &mut State, ui: &mut Ui) {
-    state
-        .ui
-        .prog_editor
-        .sync_from_progression(&state.chord_prog_active);
-
+fn composition_guide_editor(state: &mut State, ui: &mut Ui) {
     let mut dirty = false;
-    let old_key = state.ui.prog_editor.key;
-    normalize_key_choice(&mut state.ui.prog_editor.key);
+    let mut wrote_feedback = false;
+    let old_key = state.ui.guide_editor.key;
+    normalize_key_choice(&mut state.ui.guide_editor.key);
 
     ui.group(|ui| {
-        ui.heading("Chord Progression");
+        ui.heading("Composition Guide");
 
         ui.horizontal_wrapped(|ui| {
             ui.label("Key");
             let mut tonic = (
-                state.ui.prog_editor.key.base_note,
-                state.ui.prog_editor.key.sharp_flat,
+                state.ui.guide_editor.key.base_note,
+                state.ui.guide_editor.key.sharp_flat,
             );
 
-            ComboBox::from_id_salt("prog_editor_key_tonic")
+            ComboBox::from_id_salt("guide_editor_key_tonic")
                 .selected_text(tonic_label(tonic.0, tonic.1))
                 .show_ui(ui, |ui| {
                     for &(base_note, sharp_flat) in
-                        supported_key_tonics(state.ui.prog_editor.key.major_minor)
+                        supported_key_tonics(state.ui.guide_editor.key.major_minor)
                     {
                         ui.selectable_value(
                             &mut tonic,
@@ -173,61 +170,79 @@ fn chord_prog_maker(state: &mut State, ui: &mut Ui) {
                         );
                     }
                 });
-            state.ui.prog_editor.key.base_note = tonic.0;
-            state.ui.prog_editor.key.sharp_flat = tonic.1;
+            state.ui.guide_editor.key.base_note = tonic.0;
+            state.ui.guide_editor.key.sharp_flat = tonic.1;
 
-            ComboBox::from_id_salt("prog_editor_key_mode")
-                .selected_text(state.ui.prog_editor.key.major_minor.to_string())
+            ComboBox::from_id_salt("guide_editor_key_mode")
+                .selected_text(state.ui.guide_editor.key.major_minor.to_string())
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
-                        &mut state.ui.prog_editor.key.major_minor,
+                        &mut state.ui.guide_editor.key.major_minor,
                         MajorMinor::Major,
                         MajorMinor::Major.to_string(),
                     );
                     ui.selectable_value(
-                        &mut state.ui.prog_editor.key.major_minor,
+                        &mut state.ui.guide_editor.key.major_minor,
                         MajorMinor::Minor,
                         MajorMinor::Minor.to_string(),
                     );
                 });
 
-            normalize_key_choice(&mut state.ui.prog_editor.key);
-            if state.ui.prog_editor.key != old_key {
-                let new_key = state.ui.prog_editor.key;
-                sync_add_chord_quality(&mut state.ui.prog_editor.chord_to_add, new_key);
-                for chord_ui in &mut state.ui.prog_editor.chords {
-                    sync_diatonic_quality_for_key_change(chord_ui, old_key, new_key);
+            ui.add_space(COL_SPACING);
+            ui.label("Time signature");
+            ui.add(DragValue::new(&mut state.ui.guide_editor.time_sig_numerator).range(1..=32));
+            ui.label("/");
+            ComboBox::from_id_salt("guide_editor_time_sig_denominator")
+                .selected_text(state.ui.guide_editor.time_sig_denominator.to_string())
+                .show_ui(ui, |ui| {
+                    for denominator in [1_u8, 2, 4, 8, 16, 32] {
+                        ui.selectable_value(
+                            &mut state.ui.guide_editor.time_sig_denominator,
+                            denominator,
+                            denominator.to_string(),
+                        );
+                    }
+                });
+
+            ui.add_space(COL_SPACING);
+            ui.label("Tempo");
+            ui.add(DragValue::new(&mut state.ui.guide_editor.tempo).range(20..=300));
+            ui.label("BPM");
+
+            normalize_key_choice(&mut state.ui.guide_editor.key);
+            if state.ui.guide_editor.key != old_key {
+                let new_key = state.ui.guide_editor.key;
+                sync_add_chord_quality(&mut state.ui.guide_editor.measure_to_add.chord, new_key);
+                for measure_ui in &mut state.ui.guide_editor.measures {
+                    sync_diatonic_quality_for_key_change(&mut measure_ui.chord, old_key, new_key);
                 }
                 dirty = true;
             }
         });
 
         ui.add_space(ROW_SPACING / 2.0);
+        ui.label("Add measure");
 
-        ui.label("Add chord");
-        ui.horizontal_wrapped(|ui| {
-            ui.push_id("prog_editor_add_chord", |ui| {
-                draw_chord_editor_controls(
-                    ui,
-                    state.ui.prog_editor.key,
-                    &mut state.ui.prog_editor.chord_to_add,
-                    true,
-                );
-            });
-            ui.monospace(
-                state
-                    .ui
-                    .prog_editor
-                    .chord_to_add
-                    .to_chord(state.ui.prog_editor.key)
-                    .to_string(),
+        let add_key = state.ui.guide_editor.key;
+        let add_sig = state.ui.guide_editor.time_signature();
+        ui.push_id("guide_editor_add_measure", |ui| {
+            draw_measure_editor(
+                ui,
+                add_sig,
+                add_key,
+                &mut state.ui.guide_editor.measure_to_add,
+                true,
             );
-            if ui.button("Add").clicked() {
-                state
-                    .ui
-                    .prog_editor
-                    .chords
-                    .push(state.ui.prog_editor.chord_to_add.clone());
+        });
+
+        ui.horizontal_wrapped(|ui| {
+            ui.monospace(measure_preview(
+                add_key,
+                &state.ui.guide_editor.measure_to_add,
+            ));
+            if ui.button("Add measure").clicked() {
+                let measure_to_add = state.ui.guide_editor.measure_to_add.clone();
+                state.ui.guide_editor.measures.push(measure_to_add);
                 dirty = true;
             }
         });
@@ -236,54 +251,200 @@ fn chord_prog_maker(state: &mut State, ui: &mut Ui) {
         ui.separator();
         ui.add_space(ROW_SPACING / 2.0);
 
-        if state.ui.prog_editor.chords.is_empty() {
-            ui.label("No chords in the active progression yet.");
+        if state.ui.guide_editor.measures.is_empty() {
+            ui.label("No measures in the active composition guide yet.");
         } else {
-            let key = state.ui.prog_editor.key;
+            let key = state.ui.guide_editor.key;
+            let sig = state.ui.guide_editor.time_signature();
             let mut remove_idx = None;
 
-            Grid::new("prog_editor_chords_grid")
-                .num_columns(7)
-                .striped(true)
-                .spacing([COL_SPACING, ROW_SPACING / 2.0])
-                .show(ui, |ui| {
-                    ui.strong("#");
-                    ui.strong("Degree");
-                    ui.strong("Quality");
-                    ui.strong("Extension");
-                    ui.strong("Inversion");
-                    ui.strong("Preview");
-                    ui.strong("X");
-                    ui.end_row();
+            for (idx, measure_ui) in state.ui.guide_editor.measures.iter_mut().enumerate() {
+                let before = measure_ui.clone();
 
-                    for (idx, chord_ui) in state.ui.prog_editor.chords.iter_mut().enumerate() {
-                        let before = chord_ui.clone();
-
-                        ui.label((idx + 1).to_string());
-                        ui.push_id(idx, |ui| {
-                            draw_chord_editor_controls(ui, key, chord_ui, false);
-                        });
-                        ui.monospace(chord_ui.to_chord(key).to_string());
-                        if ui.small_button("X").clicked() {
+                ui.group(|ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.strong(format!("Measure {}", idx + 1));
+                        ui.add_space(COL_SPACING);
+                        ui.monospace(measure_preview(key, measure_ui));
+                        if ui.small_button("Remove").clicked() {
                             remove_idx = Some(idx);
                         }
-                        ui.end_row();
-
-                        if *chord_ui != before {
-                            dirty = true;
-                        }
-                    }
+                    });
+                    ui.add_space(ROW_SPACING / 3.0);
+                    ui.push_id(idx, |ui| {
+                        draw_measure_editor(ui, sig, key, measure_ui, false);
+                    });
                 });
 
+                ui.add_space(ROW_SPACING / 2.0);
+
+                if *measure_ui != before {
+                    dirty = true;
+                }
+            }
+
             if let Some(remove_idx) = remove_idx {
-                state.ui.prog_editor.chords.remove(remove_idx);
+                state.ui.guide_editor.measures.remove(remove_idx);
                 dirty = true;
             }
         }
+
+        if ui
+            .add_enabled(
+                !state.ui.guide_editor.measures.is_empty(),
+                Button::new("Make composition"),
+            )
+            .clicked()
+        {
+            match state.ui.guide_editor.build_guide() {
+                Ok(guide) => {
+                    let measure_count = guide.chords.len();
+                    match guide.make_comp() {
+                        Ok(comp) => {
+                            state.compositions.push(comp);
+                            state.ui.guide_editor.feedback = Some(GuideEditorFeedback {
+                                text: format!("Added composition with {measure_count} measure(s)."),
+                                is_error: false,
+                            });
+                            wrote_feedback = true;
+                        }
+                        Err(err) => {
+                            state.ui.guide_editor.feedback = Some(GuideEditorFeedback {
+                                text: format!("Could not make composition: {err}"),
+                                is_error: true,
+                            });
+                            wrote_feedback = true;
+                        }
+                    }
+                }
+                Err(err) => {
+                    state.ui.guide_editor.feedback = Some(GuideEditorFeedback {
+                        text: err,
+                        is_error: true,
+                    });
+                    wrote_feedback = true;
+                }
+            }
+        }
+
+        if let Some(feedback) = &state.ui.guide_editor.feedback {
+            let color = if feedback.is_error {
+                Color32::from_rgb(180, 40, 40)
+            } else {
+                Color32::from_rgb(40, 120, 40)
+            };
+            ui.add_space(ROW_SPACING / 2.0);
+            ui.colored_label(color, &feedback.text);
+        }
     });
 
-    if dirty {
-        state.chord_prog_active = state.ui.prog_editor.rebuild_progression();
+    if dirty && !wrote_feedback {
+        state.ui.guide_editor.feedback = None;
+    }
+}
+
+fn draw_measure_editor(
+    ui: &mut Ui,
+    time_sig: TimeSignature,
+    key: Key,
+    measure_ui: &mut CompositionGuideMeasureUi,
+    auto_sync_quality_for_degree: bool,
+) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Chord");
+        draw_chord_editor_controls(ui, key, &mut measure_ui.chord, auto_sync_quality_for_degree);
+    });
+    ui.add_space(ROW_SPACING / 3.0);
+    draw_rhythm_pattern_controls(ui, time_sig, &mut measure_ui.rhythm);
+}
+
+fn draw_rhythm_pattern_controls(
+    ui: &mut Ui,
+    time_sig: TimeSignature,
+    rhythm_ui: &mut RhythmPatternUi,
+) {
+    ui.label("Rhythm pattern");
+    ui.horizontal_wrapped(|ui| {
+        if ui.small_button("Downbeats").clicked() {
+            *rhythm_ui = RhythmPatternUi::from_pattern(&RhythmPattern::measure_downbeats(time_sig));
+        }
+        if ui.small_button("Syncopated").clicked() {
+            *rhythm_ui = RhythmPatternUi::from_pattern(&RhythmPattern::syncopated(time_sig));
+        }
+        ui.monospace(rhythm_summary(rhythm_ui));
+    });
+
+    draw_hit_spec_editor(
+        ui,
+        "Primary",
+        &mut rhythm_ui.primary_division,
+        &mut rhythm_ui.primary_hits,
+    );
+    draw_hit_spec_editor(
+        ui,
+        "Secondary",
+        &mut rhythm_ui.secondary_division,
+        &mut rhythm_ui.secondary_hits,
+    );
+    draw_hit_spec_editor(
+        ui,
+        "Tertiary",
+        &mut rhythm_ui.tertiary_division,
+        &mut rhythm_ui.tertiary_hits,
+    );
+
+    if let Err(err) = rhythm_ui.to_pattern() {
+        ui.colored_label(Color32::from_rgb(180, 40, 40), err);
+    }
+}
+
+fn draw_hit_spec_editor(ui: &mut Ui, label: &str, division: &mut u8, hits: &mut String) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(label);
+        ui.label("division");
+        ui.add(DragValue::new(division).range(0..=32));
+        ui.label("hits");
+        ui.add(
+            TextEdit::singleline(hits)
+                .desired_width(150.0)
+                .hint_text("0,2,3"),
+        );
+    });
+}
+
+fn measure_preview(key: Key, measure_ui: &CompositionGuideMeasureUi) -> String {
+    format!(
+        "{} | {}",
+        measure_ui.chord.to_chord(key),
+        rhythm_summary(&measure_ui.rhythm)
+    )
+}
+
+fn rhythm_summary(rhythm_ui: &RhythmPatternUi) -> String {
+    format!(
+        "P {} | S {} | T {}",
+        raw_hit_spec_summary(rhythm_ui.primary_division, &rhythm_ui.primary_hits),
+        raw_hit_spec_summary(rhythm_ui.secondary_division, &rhythm_ui.secondary_hits),
+        raw_hit_spec_summary(rhythm_ui.tertiary_division, &rhythm_ui.tertiary_hits),
+    )
+}
+
+fn raw_hit_spec_summary(division: u8, hits: &str) -> String {
+    if division == 0 {
+        return "-".to_string();
+    }
+
+    let cleaned = hits
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    if cleaned.is_empty() {
+        format!("{division}:[]")
+    } else {
+        format!("{division}:[{cleaned}]")
     }
 }
 
@@ -508,6 +669,6 @@ pub fn draw(state: &mut State, ui: &mut Ui) {
 
         ui.add_space(ROW_SPACING);
 
-        chord_prog_maker(state, ui);
+        composition_guide_editor(state, ui);
     });
 }
